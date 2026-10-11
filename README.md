@@ -1,9 +1,9 @@
 <p align="center">
-  An MCP client and server that exposes openparser as tools,<br>over powpow transports. Written in Nim language
+  A Nim library for building MCP clients and servers over powpow transports
 </p>
 
 <p align="center">
-  <code>nimble install datcontext</code>
+  <code>nimble install datcontext</code> / <code>clue install datcontext</code>
 </p>
 
 <p align="center">
@@ -12,8 +12,8 @@
 </p>
 
 ## 😍 Key Features
-- Generic parse, validate and normalize tools that work with any supported format
-  Useful for format detection flows and for producing minimal diff rewrites
+- Generic MCP server and client building blocks in Nim
+  Useful for high level apps that need tools, resources, prompts and subscriptions without writing protocol framing
 
 - Four transports on both client and server
   Standard input/output, Streamable HTTP, Unix socket and TCP, useful for local
@@ -21,6 +21,16 @@
 
 - Dual era protocol support for the 2026-07-28 revision
   Plus the legacy initialize handshake, useful for connecting current and older hosts without extra setup
+
+- Optional document parsing bundle through 36 openparser tools covering JSON, YAML, TOML,
+  XML, HTML, CSS, SVG, CSV, SQL, iCalendar, vCard, RSS, Atom, dotenv, plist, BSON
+  and NIF, useful for letting an assistant read, check and convert config and data files directly
+
+- Generic parse, validate and normalize tools inside the optional bundle that work with any supported format
+  Useful for format detection flows and for producing minimal diff rewrites
+
+- Scalar helpers for colors, UUIDs, paths, regular expressions and fuzzy search inside the optional bundle,
+  Useful for small validation and cleanup jobs without writing a parser
 
 - Read side resources with per format samples and optional file backed resources
   Useful for giving a model safe context about available formats and project files
@@ -32,9 +42,6 @@
 - Notification subscriptions on every transport
   Useful for learning when the tool, resource or prompt catalogue changes
 
-- Usable as a Nim library for building custom servers and clients
-  Useful for adding your own tools, resources and prompts on top of the stock set
-
 - Safe filesystem access backed by flysystem with read only policy
   Hidden file denial and containment checks, useful for exposing a project directory
   without risk of escape through parent paths, symlinks or sibling prefix tricks
@@ -42,49 +49,47 @@
 - Clear separation of protocol errors and model fixable tool errors with line,
   column and caret context, useful because a model can see exactly where a document broke
 
-- Document parsing for language models through 36 tools covering JSON, YAML, TOML,
-  XML, HTML, CSS, SVG, CSV, SQL, iCalendar, vCard, RSS, Atom, dotenv, plist, BSON
-  and NIF, useful for letting an assistant read, check and convert config and data files directly
-
-- Scalar helpers for colors, UUIDs, paths, regular expressions and fuzzy search,
-  Useful for small validation and cleanup jobs without writing a parser
-
 ## Examples
 
-Check what the server offers:
+datcontext ships no binary. High level apps integrate it as a library.
+See `examples/mcp_full_server.nim` for a complete app.
 
-```console
-$ datcontext tools | jq length
-36
-$ datcontext resources | jq length
-1
-$ datcontext prompts | jq length
-5
-```
-
-Run it over your preferred transport:
-
-```console
-datcontext stdio               # speak MCP on stdin/stdout (default)
-datcontext http 9000           # Streamable HTTP
-datcontext unix /tmp/mcp.sock  # Unix domain socket
-datcontext tcp 9001            # TCP
-datcontext tools               # print the tool catalogue as JSON
-```
-
-Point a host at it with:
-
-```json
-{ "mcpServers": { "datcontext": { "command": "datcontext", "args": ["stdio"] } } }
-```
-
-Use it as a library, server side:
+Start with a bare server and add your own tool:
 
 ```nim
 import datcontext/server/core
 
-let srv = newMcpServer()
-discard srv.listTools()  # 36 tools, registration order preserved
+let srv = newMcpServer(name = "my-app", version = "0.1.0")
+srv.registry.register("greet",
+  "Greet someone by name.",
+  objSchema(properties = props(
+    ("name", stringProp("Who to greet.")))),
+  proc(args: JsonNode): ToolResult =
+    okResult("Hello, " & argStr(args, "name")))
+```
+
+Opt in to the openparser document tools when you need them:
+
+```nim
+import datcontext/server/core
+
+# At construction time.
+let srv = newMcpServer(withOpenParserTools = true)
+
+# Or afterwards on an existing server.
+srv.registerOpenParserTools()
+```
+
+Serve over your preferred transport from your own app binary:
+
+```nim
+import datcontext/server/[core, stdio, http, stream]
+
+let srv = newMcpServer(withOpenParserTools = true)
+srv.runStdio()          # speak MCP on stdin/stdout
+srv.runHttp(9000)       # Streamable HTTP
+srv.runUnix("/tmp/mcp.sock")  # Unix domain socket
+srv.runTcp(9001)        # TCP
 ```
 
 Call a tool over HTTP, client side:
@@ -102,7 +107,7 @@ Read a resource and fetch a prompt:
 ```nim
 import flysystem
 
-let srv = newMcpServer(fileRoot = "/srv/data")
+let srv = newMcpServer(fileRoot = "/srv/data", withOpenParserTools = true)
 let formats = srv.resources.read("datcontext://formats")
 let prompt = srv.prompts.find("select_parser").resolve(%*{"path": "a.ron"})
 
@@ -139,11 +144,13 @@ data: {"jsonrpc":"2.0","method":"notifications/subscriptions/acknowledged","para
 
 ## What it is
 
-`datcontext` turns a document parser into something a language model can call.
-36 tools cover JSON, YAML, TOML, XML, HTML, CSS, SVG, CSV, SQL, iCalendar,
-vCard, RSS, Atom, dotenv, plist, BSON, and NIF, plus scalar helpers for colors,
-UUIDs, paths, regular expressions, and fuzzy search. Alongside them it serves
-resources, prompts, and notification subscriptions.
+`datcontext` is a library for building MCP clients and servers, not a CLI app.
+A bare server starts with empty tool registries plus the standard resources
+and prompts. High level apps register their own tools and optionally opt in
+to the openparser document bundle (36 tools covering JSON, YAML, TOML, XML,
+HTML, CSS, SVG, CSV, SQL, iCalendar, vCard, RSS, Atom, dotenv, plist, BSON,
+and NIF, plus scalar helpers for colors, UUIDs, paths, regular expressions,
+and fuzzy search).
 
 It targets the **2026-07-28** revision of the MCP specification and is
 dual era: it serves modern stateless requests and also answers the legacy
@@ -151,25 +158,11 @@ dual era: it serves modern stateless requests and also answers the legacy
 
 ## Install
 
-Built with [clue](https://github.com/openpeeps/clue). Both dependencies are
-`clue develop` symlinks, so clue resolves them as local develop paths.
-
 ```console
-clue build src/datcontext.nim --out:bin/datcontext
+nimble install datcontext
 ```
 
-## Run
-
-```console
-datcontext stdio               # speak MCP on stdin/stdout (default)
-datcontext http [port]         # Streamable HTTP (default 9000)
-datcontext unix <path>         # Unix domain socket
-datcontext tcp <port>          # TCP
-datcontext tools               # print the tool catalogue as JSON
-```
-
-All logging goes to stderr. stdout carries MCP messages only, which the stdio
-binding requires.
+Built with [clue](https://github.com/openpeeps/clue).
 
 ## Resources
 
@@ -178,11 +171,11 @@ Read-side context, URI-addressed. Enabled by default:
 - `datcontext://formats` (the format table as JSON)
 - `datcontext://formats/{format}/sample` (a minimal valid document per format)
 
-Filesystem resources are **off by default**. Set `DATCONTEXT_FILE_ROOT` to serve
+Filesystem resources are **off by default**. Pass `fileRoot` to serve
 `file://` URIs from under a directory:
 
-```console
-DATCONTEXT_FILE_ROOT=~/project datcontext stdio
+```nim
+let srv = newMcpServer(fileRoot = "/srv/data")
 ```
 
 Backed by [flysystem](https://github.com/openpeeps/flysystem): a `LocalDriver`
@@ -232,7 +225,13 @@ newline-delimited JSON framing, as the specification directs.
 Streamable HTTP also speaks SSE, hand-rolled in `server/sse.nim` because powpow
 has no SSE helper and SSE cannot use `Content-Length`.
 
+All logging goes to stderr in the example apps. stdout carries MCP messages
+only, which the stdio binding requires.
+
 ## Tools
+
+The openparser bundle is optional. Opt in with `withOpenParserTools = true`
+or `registerOpenParserTools()`, then the server exposes 36 tools.
 
 Format-specific tools (`parse_yaml`, `validate_toml`, ...) carry precise JSON
 Schemas. Four generic tools work with any supported format:
@@ -244,7 +243,7 @@ Schemas. Four generic tools work with any supported format:
 
 ### Error reporting
 
-The specification distinguishes two failure modes, and this server keeps them
+The specification distinguishes two failure modes, and this library keeps them
 apart:
 
 - **Protocol errors** (JSON-RPC `-32602` etc.) for malformed requests and
@@ -259,13 +258,12 @@ own `try`/`except` and a parser failure can never take the connection down.
 ## Tests
 
 ```console
-clue build src/datcontext.nim --out:bin/datcontext
 for t in tests/test_*.nim; do clue build "$t" --out:"bin/$(basename ${t%.nim})"; done
 for t in bin/test_*; do "$t"; done
 ```
 
-260 tests across eight files, all passing. The round-trip suite spawns the real
-binary and drives it over every transport, which is the only way to catch
+The round-trip suite spawns the example app binary (`examples/mcp_full_server`)
+and drives it over every transport, which is the only way to catch
 framing and connection bugs.
 
 ## Environment
@@ -273,7 +271,10 @@ framing and connection bugs.
 | Variable | Effect |
 | - | - |
 | `DATCONTEXT_MAX_SOURCE_BYTES` | Cap on any single parsed document (default 32 MiB) |
-| `DATCONTEXT_FILE_ROOT` | Enable `file://` resources under this directory (flysystem-backed) |
+
+`fileRoot` is now a constructor argument (`newMcpServer(fileRoot = ...)`),
+not an environment variable. The example app reads `DATCONTEXT_FILE_ROOT`
+as a convenience for its own `file://` root.
 
 ## A note on flysystem's containment
 

@@ -6,10 +6,10 @@
 
 ## A full-featured example MCP server.
 ##
-## The stock `datcontext` binary is a fixed-function server. This example shows
-## how to build your own on the same library: it starts from `newMcpServer`
-## (so every openparser tool, resource, and prompt is already registered) and
-## adds server-specific behaviour on top:
+## This example shows how a high-level app integrates datcontext as a library:
+## it starts from `newMcpServer` with the optional openparser tool bundle
+## enabled (so every openparser tool, resource, and prompt is registered) and
+## adds app-specific behaviour on top:
 ##
 ## * custom tools: `example_greet` (structured output plus the `isError` path),
 ##   `example_wordcount` (inline-or-file input, annotations, output schema),
@@ -189,7 +189,7 @@ proc main() =
     instructions = "An example MCP server: every openparser tool plus " &
       "example_greet, example_wordcount, and example_add_tool; " &
       "datcontext:// and file:// resources; six prompts.",
-    fileRoot = shareDir())
+    fileRoot = shareDir(), withOpenParserTools = true)
   registerExampleTools(srv)
   registerExampleResource(srv)
   registerExamplePrompt(srv)

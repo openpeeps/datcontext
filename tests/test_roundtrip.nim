@@ -7,7 +7,9 @@ import ../src/datcontext/server/core
 import ../src/datcontext/tools/tool
 
 const
-  ServerBin = "bin/datcontext"
+  # datcontext itself ships no binary (library only). Transport round trips
+  # spawn the example high-level app, which opts in to the openparser bundle.
+  ServerBin = "bin/example_full_server"
 
 suite "round trip against a real spawned server":
   test "discover identifies the server as modern":
@@ -20,7 +22,7 @@ suite "round trip against a real spawned server":
 
     check c.probe() == "modern"
     check c.protocolVersion == ProtocolVersion
-    check c.serverInfo["name"].getStr == "datcontext"
+    check c.serverInfo["name"].getStr == "example-full"
     check c.instructions.len > 0
 
   test "tools/list over the wire":
@@ -102,7 +104,8 @@ suite "live transports against running servers":
     sleep(600)
     let c = connectHttp("http://127.0.0.1:" & $port)
     check c.probe() == "modern"
-    check c.listTools()["result"]["tools"].len == 36
+    # 36 openparser tools plus 3 example app tools.
+    check c.listTools()["result"]["tools"].len == 39
     let reply = c.callTool("parse_yaml", %*{"source": "a: 1"})
     check reply["result"]["content"][0]["text"].getStr.contains("a:")
 
@@ -117,7 +120,7 @@ suite "live transports against running servers":
 
     let c = connectTcpClient("127.0.0.1", port)
     check c.probe() == "modern"
-    check c.listTools()["result"]["tools"].len == 36
+    check c.listTools()["result"]["tools"].len == 39
     let reply = c.callTool("parse_toml", %*{"source": "a = 1"})
     check reply["result"]["content"][0]["text"].getStr.contains("a = 1")
 
@@ -135,14 +138,12 @@ suite "live transports against running servers":
 
     let c = connectUnixClient(path)
     check c.probe() == "modern"
-    check c.listTools()["result"]["tools"].len == 36
+    check c.listTools()["result"]["tools"].len == 39
     let reply = c.callTool("parse_xml", %*{"source": "<a>hi</a>"})
     check reply["result"]["content"][0]["text"].getStr.contains("<a>")
 
 suite "resources and prompts over the wire":
   test "resources/list and resources/read":
-    if not fileExists(ServerBin):
-      skip()
     let srv = newMcpServer()
     let c = newClient(ClientTransport(
       kind: "inproc", send: proc(m: JsonNode): JsonNode =
@@ -168,8 +169,6 @@ suite "resources and prompts over the wire":
     check read[0]["text"].getStr.contains("key")
 
   test "prompts/list and prompts/get":
-    if not fileExists(ServerBin):
-      skip()
     let srv = newMcpServer()
     let c = newClient(ClientTransport(
       kind: "inproc", send: proc(m: JsonNode): JsonNode =
@@ -196,8 +195,6 @@ suite "resources and prompts over the wire":
 
 suite "subscriptions against a real spawned server":
   test "the ack is written before anything else on the channel":
-    if not fileExists(ServerBin):
-      skip()
     # Two requests on one pipe: the subscription ack must not be reordered
     # behind an unrelated reply.
     let srv = newMcpServer()

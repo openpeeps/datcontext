@@ -33,8 +33,16 @@ suite "server/discover":
     check not r.hasKey("error")
 
 suite "tools/list":
+  test "bare server starts with no tools, openparser bundle is opt-in":
+    let bare = newMcpServer()
+    check bare.registry.tools.len == 0
+    let full = newMcpServer(withOpenParserTools = true)
+    check full.registry.tools.len == 36
+    full.registerOpenParserTools()
+    check full.registry.tools.len == 36
+
   test "returns registered tools in stable order":
-    let srv = newMcpServer()
+    let srv = newMcpServer(withOpenParserTools = true)
     let r = call(srv, "tools/list", modernParams(ProtocolVersion, "c", "1.0"))
     let tools = r["result"]["tools"]
     check tools.len == len(srv.registry.tools)
@@ -55,7 +63,7 @@ suite "tools/list":
 
 suite "tools/call":
   test "calls a tool and returns content":
-    let srv = newMcpServer()
+    let srv = newMcpServer(withOpenParserTools = true)
     var params = modernParams(ProtocolVersion, "c", "1.0")
     params["name"] = newJString("parse_json")
     params["arguments"] = %*{"source": "{\"a\":1}"}
@@ -79,7 +87,7 @@ suite "tools/call":
     check r["error"]["code"].getInt == -32602
 
   test "parse failure is a tool execution error the model can act on":
-    let srv = newMcpServer()
+    let srv = newMcpServer(withOpenParserTools = true)
     var params = modernParams(ProtocolVersion, "c", "1.0")
     params["name"] = newJString("parse_json")
     params["arguments"] = %*{"source": "{not json"}
@@ -89,7 +97,7 @@ suite "tools/call":
     check not r.hasKey("error")
 
   test "bad arguments become a tool error, not a protocol error":
-    let srv = newMcpServer()
+    let srv = newMcpServer(withOpenParserTools = true)
     var params = modernParams(ProtocolVersion, "c", "1.0")
     params["name"] = newJString("parse_json")
     params["arguments"] = %*{"source": "x", "path": "y"}
@@ -97,7 +105,7 @@ suite "tools/call":
     check r["result"]["isError"].getBool
 
   test "list_formats reports depth bounds honestly":
-    let srv = newMcpServer()
+    let srv = newMcpServer(withOpenParserTools = true)
     var params = modernParams(ProtocolVersion, "c", "1.0")
     params["name"] = newJString("list_formats")
     params["arguments"] = newJObject()
@@ -130,7 +138,7 @@ suite "dual-era":
     check r["result"]["protocolVersion"].getStr == "2024-11-05"
 
   test "legacy client can call tools without modern _meta":
-    let srv = newMcpServer()
+    let srv = newMcpServer(withOpenParserTools = true)
     discard call(srv, "initialize",
       %*{"protocolVersion": "2025-06-18", "capabilities": newJObject()})
     discard srv.handleMessage(%*{"jsonrpc": "2.0", "method": "notifications/initialized"})

@@ -8,14 +8,6 @@ import std/httpcore
 import ../src/datcontext/client/[core, http]
 import ../src/datcontext/server/sse
 
-const
-  ServerBin = "bin/datcontext"
-  Port = 19200
-  UnixPath = "/tmp/datcontext_test.sock"
-
-proc modernClient(): McpClient =
-  connectHttp("http://127.0.0.1:" & $Port)
-
 suite "client era detection":
   test "a modern server is detected and stays modern":
     let srv = newMcpServer()
@@ -72,7 +64,7 @@ suite "client era detection":
 
 suite "client requests over a modern server":
   test "tools/list works after probing":
-    let srv = newMcpServer()
+    let srv = newMcpServer(withOpenParserTools = true)
     let c = newClient(ClientTransport(
       kind: "inproc",
       send: proc(msg: JsonNode): JsonNode = srv.handleMessage(msg)))
@@ -83,7 +75,7 @@ suite "client requests over a modern server":
     check tools.len == len(srv.registry.names())
 
   test "tools/call round trips through a real server":
-    let srv = newMcpServer()
+    let srv = newMcpServer(withOpenParserTools = true)
     let c = newClient(ClientTransport(
       kind: "inproc",
       send: proc(msg: JsonNode): JsonNode = srv.handleMessage(msg)))
@@ -94,7 +86,7 @@ suite "client requests over a modern server":
     check r["content"][0]["text"].getStr.contains("a:")
 
   test "a legacy client can still list tools":
-    let srv = newMcpServer()
+    let srv = newMcpServer(withOpenParserTools = true)
     let c = newClient(ClientTransport(
       kind: "inproc",
       send: proc(msg: JsonNode): JsonNode =

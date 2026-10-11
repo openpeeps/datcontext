@@ -87,7 +87,7 @@ proc main(path: string) =
     echo "empty name:  isError=" & $bad["isError"].getBool &
       " (" & preview(bad["content"][0]["text"].getStr) & ")"
 
-    # Stock openparser tool over the socket.
+    # Optional openparser bundle tool over the socket.
     let parsed = c.callTool("parse_toml",
       %*{"source": "a = 1"})["result"]
     echo "parse_toml:  " & preview(parsed["content"][0]["text"].getStr)
