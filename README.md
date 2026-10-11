@@ -1,5 +1,4 @@
 <p align="center">
-  <img src="https://github.com/openpeeps/PKG/blob/main/.github/logo.png" width="90px"><br>
   An MCP client and server that exposes openparser as tools,<br>over powpow transports. Written in Nim language
 </p>
 
@@ -13,19 +12,42 @@
 </p>
 
 ## 😍 Key Features
-- [x] Open Source | MIT License
-- [x] Written in Nim language
-- [x] Document parsing for language models through 36 tools covering JSON, YAML, TOML, XML, HTML, CSS, SVG, CSV, SQL, iCalendar, vCard, RSS, Atom, dotenv, plist, BSON and NIF, useful for letting an assistant read, check and convert config and data files directly
-- [x] Scalar helpers for colors, UUIDs, paths, regular expressions and fuzzy search, useful for small validation and cleanup jobs without writing a parser
-- [x] Generic parse, validate and normalize tools that work with any supported format, useful for format detection flows and for producing minimal diff rewrites
-- [x] Four transports on both client and server (standard input/output, Streamable HTTP, Unix socket and TCP), useful for local subprocess use, web services and socket based agents
-- [x] Dual era protocol support for the 2026-07-28 revision plus the legacy initialize handshake, useful for connecting current and older hosts without extra setup
-- [x] Read side resources with per format samples and optional file backed resources, useful for giving a model safe context about available formats and project files
-- [x] Five guided prompts for diagnosing documents, converting between formats, reviewing configs, explaining parse errors and picking a parser, useful as slash commands in MCP hosts
-- [x] Notification subscriptions on every transport, useful for learning when the tool, resource or prompt catalogue changes
-- [x] Usable as a Nim library for building custom servers and clients, useful for adding your own tools, resources and prompts on top of the stock set
-- [x] Safe filesystem access backed by flysystem with read only policy, hidden file denial and containment checks, useful for exposing a project directory without risk of escape through parent paths, symlinks or sibling prefix tricks
-- [x] Clear separation of protocol errors and model fixable tool errors with line, column and caret context, useful because a model can see exactly where a document broke
+- Generic parse, validate and normalize tools that work with any supported format
+  Useful for format detection flows and for producing minimal diff rewrites
+
+- Four transports on both client and server
+  Standard input/output, Streamable HTTP, Unix socket and TCP, useful for local
+  subprocess use, web services and socket based agents
+
+- Dual era protocol support for the 2026-07-28 revision
+  Plus the legacy initialize handshake, useful for connecting current and older hosts without extra setup
+
+- Read side resources with per format samples and optional file backed resources
+  Useful for giving a model safe context about available formats and project files
+
+- Five guided prompts for diagnosing documents
+  Converting between formats, reviewing configs, explaining parse errors
+  and picking a parser, useful as slash commands in MCP hosts
+
+- Notification subscriptions on every transport
+  Useful for learning when the tool, resource or prompt catalogue changes
+
+- Usable as a Nim library for building custom servers and clients
+  Useful for adding your own tools, resources and prompts on top of the stock set
+
+- Safe filesystem access backed by flysystem with read only policy
+  Hidden file denial and containment checks, useful for exposing a project directory
+  without risk of escape through parent paths, symlinks or sibling prefix tricks
+
+- Clear separation of protocol errors and model fixable tool errors with line,
+  column and caret context, useful because a model can see exactly where a document broke
+
+- Document parsing for language models through 36 tools covering JSON, YAML, TOML,
+  XML, HTML, CSS, SVG, CSV, SQL, iCalendar, vCard, RSS, Atom, dotenv, plist, BSON
+  and NIF, useful for letting an assistant read, check and convert config and data files directly
+
+- Scalar helpers for colors, UUIDs, paths, regular expressions and fuzzy search,
+  Useful for small validation and cleanup jobs without writing a parser
 
 ## Examples
 
