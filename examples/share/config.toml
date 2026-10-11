@@ -1,0 +1,3 @@
+[server]
+name = "example-full"
+transports = ["stdio", "http", "unix", "tcp"]
