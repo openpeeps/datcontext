@@ -180,57 +180,16 @@ suite "policy translation":
     check rules.allowedMimeTypes == @["application/yaml"]
 
 suite "mime types":
-  # MIME types come from the format table (samples) and the flysystem disk
-  # (files): no second extension table is kept here. Read-side policy is
-  # covered by the "file resources" suite above and by flysystem's own
-  # read-side matrix in its test_policy suite.
-  test "format samples carry the table MIME type":
-    check formatMimeType("json") == "application/json"
-    check formatMimeType("yaml") == "application/yaml"
-    check formatMimeType("toml") == "application/toml"
-    check formatMimeType("xml") == "application/xml"
-    check formatMimeType("nope") == "text/plain"
-
+  # MIME types for files come from the flysystem disk: no second
+  # extension table is kept here. Read-side policy is covered by the
+  # "file resources" suite above and by flysystem's own read-side matrix
+  # in its test_policy suite.
   test "file MIME types come from the disk":
     let root = buildRoot()
     defer: dropRoot(root)
     let reg = buildResourceRegistry(root)
     check reg.read("file:///ok.yaml")[0].mimeType == "text/yaml"
     check reg.read("file:///sub/nested.toml")[0].mimeType == "application/toml"
-
-suite "datcontext resources":
-  let reg = buildResourceRegistry()
-
-  test "the formats resource lists every format":
-    let reg = buildResourceRegistry()
-    let got = reg.read("datcontext://formats")
-    let doc = parseJson(got[0].text)
-    check doc["count"].getInt > 0
-    check doc["formats"].len == doc["count"].getInt
-    check got[0].mimeType == "application/json"
-
-  test "a format sample is served":
-    for f in ["json", "yaml", "toml", "xml"]:
-      let got = reg.read("datcontext://formats/" & f & "/sample")
-      check got[0].text.len > 0
-      check got[0].mimeType == formatMimeType(f)
-
-  test "an unknown format sample is an error":
-    expect McpError:
-      discard reg.read("datcontext://formats/nope/sample")
-
-  test "the format list is advertised":
-    let list = reg.listJson()
-    var found = false
-    for r in list:
-      if r["uri"].getStr == "datcontext://formats": found = true
-    check found
-
-  test "a template is advertised":
-    var found = false
-    for t in reg.templatesJson():
-      if t["uriTemplate"].getStr.contains("{format}"): found = true
-    check found
 
 suite "resource listing with a file root":
   test "the file root is advertised":
@@ -248,16 +207,19 @@ suite "resource listing with a file root":
     let reg = buildResourceRegistry()
     for r in reg.listJson():
       check not r["uri"].getStr.startsWith("file://")
-    check reg.templatesJson().len == 1
+    check reg.templatesJson().len == 0
 
 suite "longest prefix wins":
   test "the more specific reader handles the URI":
     let reg = buildResourceRegistry()
-    # `datcontext://formats/` must win over `datcontext://formats`, otherwise
-    # the index URI would be handled as a sample lookup.
-    check reg.matchesPrefix("datcontext://formats/yaml/sample") ==
-          "datcontext://formats/"
-    check reg.matchesPrefix("datcontext://formats") == "datcontext://formats"
+    reg.addReader("example://items/",
+      proc(uri: string): ResourceContents =
+        ResourceContents(uri: uri, mimeType: "text/plain", text: "item"))
+    reg.addReader("example://",
+      proc(uri: string): ResourceContents =
+        ResourceContents(uri: uri, mimeType: "text/plain", text: "root"))
+    check reg.matchesPrefix("example://items/1") == "example://items/"
+    check reg.matchesPrefix("example://other") == "example://"
     check reg.matchesPrefix("other://x").len == 0
 
 suite "contents rendering":

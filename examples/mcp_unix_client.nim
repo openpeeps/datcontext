@@ -87,20 +87,15 @@ proc main(path: string) =
     echo "empty name:  isError=" & $bad["isError"].getBool &
       " (" & preview(bad["content"][0]["text"].getStr) & ")"
 
-    # Optional openparser bundle tool over the socket.
-    let parsed = c.callTool("parse_toml",
-      %*{"source": "a = 1"})["result"]
-    echo "parse_toml:  " & preview(parsed["content"][0]["text"].getStr)
-
     let resources = call(c, "resources/list")["resources"]
     echo "resources:   " & $resources.len
     for r in resources:
       echo "  - " & r["uri"].getStr
 
-    let formats = call(c, "resources/read",
-      %*{"uri": "datcontext://formats"})
-    echo "formats:     " &
-      preview(formats["contents"][0]["text"].getStr)
+    let greeting = call(c, "resources/read",
+      %*{"uri": "example://greeting"})
+    echo "greeting:    " &
+      preview(greeting["contents"][0]["text"].getStr)
 
     # Present only when the server enables file:// resources (the example
     # server does, rooted at examples/share). Against a server without them

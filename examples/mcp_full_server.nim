@@ -7,9 +7,8 @@
 ## A full-featured example MCP server.
 ##
 ## This example shows how a high-level app integrates datcontext as a library:
-## it starts from `newMcpServer` with the optional openparser tool bundle
-## enabled (so every openparser tool, resource, and prompt is registered) and
-## adds app-specific behaviour on top:
+## it starts from the bare `newMcpServer` and adds app-specific behaviour
+## on top:
 ##
 ## * custom tools: `example_greet` (structured output plus the `isError` path),
 ##   `example_wordcount` (inline-or-file input, annotations, output schema),
@@ -99,7 +98,7 @@ proc registerExampleTools(srv: McpServer) =
       ("lines", intProp("Line count.")))),
     annotations: %*{"readOnlyHint": true, "idempotentHint": true},
     handler: guard(proc(args: JsonNode): ToolResult =
-      # Shared with every stock tool: exactly one of source/path, honours
+      # Shared input helper: exactly one of source/path, honours
       # DATCONTEXT_MAX_SOURCE_BYTES, understands file:// URIs.
       let src = readSource(args)
       let lines = if src.len == 0: 0 else: src.splitLines().len
@@ -170,15 +169,13 @@ proc registerExamplePrompt(srv: McpServer) =
         description: "Tour the example server",
         messages: @[userMsg(
           "You are connected to the example-full server over " & via & "." &
-          "\n\n1. Call `tools/list` and find the three `example_*` tools " &
-          "among the openparser ones." &
+          "\n\n1. Call `tools/list` and find the three `example_*` tools." &
           "\n2. Call `example_greet` with your name, then with an empty " &
           "name to see the `isError` path." &
           "\n3. Call `example_wordcount` on the sample config under " &
           "examples/share via its `file://` URI." &
-          "\n4. Read `datcontext://formats` and one format sample." &
-          "\n5. Read the `example://greeting` resource." &
-          "\n6. Call `example_add_tool`, then `tools/list` again to see " &
+          "\n4. Read the `example://greeting` resource." &
+          "\n5. Call `example_add_tool`, then `tools/list` again to see " &
           "the dynamic tool.")]))
 
 proc main() =
@@ -186,10 +183,10 @@ proc main() =
   let cmd = if args.len > 0: args[0] else: "stdio"
 
   let srv = newMcpServer(name = ExampleName, version = ExampleVersion,
-    instructions = "An example MCP server: every openparser tool plus " &
+    instructions = "An example MCP server: " &
       "example_greet, example_wordcount, and example_add_tool; " &
-      "datcontext:// and file:// resources; six prompts.",
-    fileRoot = shareDir(), withOpenParserTools = true)
+      "example:// and file:// resources; one prompt.",
+    fileRoot = shareDir())
   registerExampleTools(srv)
   registerExampleResource(srv)
   registerExamplePrompt(srv)

@@ -1,4 +1,4 @@
-# datcontext — MCP client/server exposing openparser over powpow transports.
+# datcontext — generic MCP building blocks over powpow transports.
 #
 # (c) 2026 George Lemon | MIT License
 #          Made by Humans from OpenPeeps
@@ -164,12 +164,11 @@ proc newRegistry*(): ToolRegistry =
 proc guard*(handler: ToolHandler): ToolHandler =
   ## Wrap a handler so no exception escapes it.
   ##
-  ## openparser raises a distinct `CatchableError` per format, and a tool that
-  ## failed to anticipate one would take the connection down instead of telling
-  ## the model what went wrong. Wrapping centrally means a handler can just
-  ## parse and let the failure become a tool execution error, which is what the
-  ## specification wants: a self-correctable error the model can act on, not a
-  ## protocol error.
+  ## A tool that failed to anticipate an error would take the connection down
+  ## instead of telling the model what went wrong. Wrapping centrally means a
+  ## handler can just do its work and let the failure become a tool execution
+  ## error, which is what the specification wants: a self-correctable error
+  ## the model can act on, not a protocol error.
   result = proc(args: JsonNode): ToolResult =
     try:
       handler(args)
@@ -191,7 +190,7 @@ proc register*(reg: ToolRegistry; name, description: string;
   ## Convenience registration without building a `Tool` by hand.
   ##
   ## The handler is wrapped in `guard`, so a tool never needs its own try/except
-  ## around parser calls.
+  ## around fallible work.
   reg.register(Tool(
     name: name,
     title: title,

@@ -1,7 +1,7 @@
 import unittest, os, strutils, tables
 import openparser/json
 import ../src/datcontext/protocol/errors
-import ../src/datcontext/tools/[formats, load, summary, tool]
+import ../src/datcontext/tools/[load, summary, tool]
 
 suite "tool schemas":
   test "objSchema is valid JSON Schema":
@@ -29,9 +29,9 @@ suite "tool schemas":
       check t["inputSchema"]["type"].getStr == "object"
 
   test "enumProp constrains values":
-    let p = enumProp("a format", ["json", "yaml"])
+    let p = enumProp("a kind", ["a", "b"])
     check p["enum"].len == 2
-    check p["enum"][0].getStr == "json"
+    check p["enum"][0].getStr == "a"
 
   test "properties render their types":
     check intProp("n")["type"].getStr == "integer"
@@ -134,100 +134,6 @@ suite "argument access":
     check argInt(%*{"a": "7"}, "a") == 7
     check argInt(%*{"a": 2.9}, "a") == 2
     check argInt(newJObject(), "a", 3) == 3
-
-suite "format table":
-  test "formats are listed and unique":
-    var seen: OrderedTable[string, bool]
-    for f in formats():
-      check not seen.hasKey(f.name)
-      seen[f.name] = true
-      check f.render != nil
-      check f.description.len > 0
-
-  test "lookup is case-insensitive":
-    check findFormat("JSON").name == "json"
-    check findFormat("yaml").name == "yaml"
-    check findFormat("nope").render == nil
-
-  test "bounded formats report the flag honestly":
-    for f in formats():
-      if f.name in ["json", "yaml"]:
-        check f.depthBounded
-      if f.name in ["toml", "xml", "html", "css", "svg", "sql"]:
-        # openparser exposes no depth bound for these, so the tool must not
-        # imply one is enforced.
-        check not f.depthBounded
-
-suite "renderers":
-  test "json round trip":
-    let f = findFormat("json")
-    check f.render("""{"a":1}""", 0) == """{"a":1}"""
-
-  test "yaml renders canonical form":
-    let f = findFormat("yaml")
-    check f.render("a:   1", 0).contains("a:")
-
-  test "toml renders canonical form":
-    let f = findFormat("toml")
-    check f.render("a=1", 0).contains("a")
-
-  test "xml round trip":
-    let f = findFormat("xml")
-    check f.render("<a>1</a>", 0).contains("<a>")
-
-  test "html yields visible text":
-    let f = findFormat("html")
-    check f.render("<p>hello</p>", 0).contains("hello")
-
-  test "sql renders":
-    let f = findFormat("sql")
-    discard f.render("SELECT 1", 0)
-
-  test "depth bound is enforced for json":
-    let f = findFormat("json")
-    var deep = "{\"a\":"
-    for i in 0 ..< 20:
-      deep.add("{\"a\":")
-    deep.add("1")
-    for i in 0 ..< 20:
-      deep.add("}")
-    deep.add("}")
-    expect CatchableError:
-      discard f.render(deep, 5)
-
-  test "unknown format render is skipped":
-    check findFormat("nope").render == nil
-
-suite "registration":
-  test "registerAll wires every tool":
-    let reg = newRegistry()
-    registerAll(reg)
-    check reg.len > 0
-    check reg.has("parse")
-    check reg.has("list_formats")
-    check reg.has("validate")
-    check reg.has("normalize")
-    check reg.has("parse_json")
-    check reg.has("parse_yaml")
-    check reg.has("parse_toml")
-
-  test "every registered tool has a name and description":
-    let reg = newRegistry()
-    registerAll(reg)
-    for t in reg.listJson:
-      check t["name"].getStr.len > 0
-      check t.hasKey("description")
-      check t["description"].getStr.len > 0
-      check t["inputSchema"]["type"].getStr == "object"
-
-  test "tool names are within the spec's limits":
-    # 1..128 chars, and no spaces or commas.
-    let reg = newRegistry()
-    registerAll(reg)
-    for n in reg.names():
-      check n.len >= 1 and n.len <= 128
-      for c in n:
-        check c notin {' ', ','}
 
 suite "source loading":
   test "inline source":

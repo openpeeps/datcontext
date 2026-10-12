@@ -1,4 +1,4 @@
-# datcontext — MCP client/server exposing openparser over powpow transports.
+# datcontext — generic MCP building blocks over powpow transports.
 #
 # (c) 2026 George Lemon | MIT License
 #          Made by Humans from OpenPeeps
@@ -26,7 +26,6 @@ import ../prompts
 import ../protocol/[errors, framing, meta, types, version]
 import ../resources
 import ../subscriptions
-import ../tools/formats
 import ../tools/tool
 
 const
@@ -35,14 +34,6 @@ const
   ServerInstructions* = "MCP server with tools, resources, prompts and " &
     "subscriptions over stdio, HTTP, Unix socket and TCP. Register your " &
     "own tools, resources and prompts on top of the empty registries."
-  OpenParserInstructions* = "Parses and canonicalizes documents in " &
-    "JSON, YAML, TOML, XML, HTML, CSS, SVG, SQL, CSV, iCalendar, vCard, RSS, " &
-    "Atom, dotenv, plist, BSON, and NIF. Use list_formats to see the full " &
-    "set, parse to canonicalize any supported format, and the " &
-    "format-specific tools (parse_yaml, validate_toml, ...) when the format is " &
-    "already known. Every tool accepts either an inline source string or a " &
-    "file path. Read datcontext://formats for the MIME types, and " &
-    "datcontext://formats/<format>/sample for a minimal example of one."
 
 type
   McpServer* = ref object
@@ -70,37 +61,19 @@ type
     initialized*: bool
     ## True once a legacy client has sent `notifications/initialized`.
 
-proc registerOpenParserTools*(srv: McpServer) =
-  ## Opt-in to the openparser tool bundle (36 tools).
-  ##
-  ## High-level apps call this when they want document parsing.
-  ## Kept separate from construction so a bare server stays empty
-  ## and the openparser dependency is only exercised on demand.
-  srv.registry.registerAll()
-
 proc newMcpServer*(name = ServerName; version = ServerVersion;
                    instructions = ServerInstructions;
-                   fileRoot = ""; withOpenParserTools = false): McpServer =
-  ## A bare MCP server with empty tool registries plus the standard
-  ## resources and prompts.
+                   fileRoot = ""): McpServer =
+  ## A bare MCP server with empty tool, resource and prompt registries.
   ##
-  ## Pass `withOpenParserTools = true` (or call `registerOpenParserTools`
-  ## afterwards) to also register the openparser document tools.
-  ## When the flag is set and the default instructions were kept,
-  ## the openparser instructions are used instead.
-  ##
-  ## `fileRoot` enables `file://` resources rooted at that directory. Leave it
-  ## empty to disable filesystem resources entirely, which is the right default
-  ## for a server a model drives.
-  let effectiveInstructions =
-    if withOpenParserTools and instructions == ServerInstructions:
-      OpenParserInstructions
-    else:
-      instructions
+  ## Higher-level apps register their own tools, resources and prompts on top.
+  ## Pass `fileRoot` to enable `file://` resources rooted at that directory.
+  ## Leave it empty to disable filesystem resources entirely, which is the
+  ## right default for a server a model drives.
   result = McpServer(
     name: name,
     version: version,
-    instructions: effectiveInstructions,
+    instructions: instructions,
     registry: newRegistry(),
     resources: buildResourceRegistry(fileRoot),
     prompts: buildPromptRegistry(),
@@ -108,8 +81,6 @@ proc newMcpServer*(name = ServerName; version = ServerVersion;
     fileRoot: fileRoot,
     logLevel: "info"
   )
-  if withOpenParserTools:
-    result.registerOpenParserTools()
   initLock(result.eraLock)
 
 proc registry*(srv: McpServer): ToolRegistry =
@@ -251,7 +222,7 @@ proc handleCallTool*(srv: McpServer; id: JsonNode; params: JsonNode): JsonNode =
       payload["structuredContent"] = e.data
     srv.newSuccess(id, payload)
   except CatchableError as e:
-    # openparser raises CatchableError subclasses for malformed input; the
+    # A handler raising for bad input is model-recoverable; the
     # specification wants the model to see these so it can correct itself.
     var payload = newJObject()
     payload["content"] = contentArray(@[textContent(e.msg)])

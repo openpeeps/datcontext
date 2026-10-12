@@ -2,6 +2,7 @@ import unittest, strutils
 import openparser/json
 import ../src/datcontext/protocol/[errors, meta, version]
 import ../src/datcontext/prompts
+import ../src/datcontext/resources
 import ../src/datcontext/server/core
 import ../src/datcontext/subscriptions
 
@@ -28,18 +29,41 @@ proc getPrompt(srv: McpServer; name: string;
     params["arguments"] = args
   call(srv, "prompts/get", params)
 
+proc promptServer(): McpServer =
+  ## A server with one app-specific prompt, for prompts/get coverage.
+  result = newMcpServer()
+  let preg = result.prompts
+  preg.add(
+    Prompt(name: "tour",
+      title: "Tour the server",
+      description: "Walk through what this server offers.",
+      arguments: @[
+        PromptArgument(name: "place", description: "The place to tour.",
+                       required: true),
+      ]),
+    proc(args: JsonNode): PromptResult =
+      let place = preg.argOf(args, "place")
+      PromptResult(
+        description: "Tour " & place,
+        messages: @[userMsg("Welcome to " & place & ". Call `tools/list` first.")]))
+
 suite "prompts/list":
-  test "every prompt has a name and description":
+  test "a bare server starts with no prompts":
     let srv = newMcpServer()
     let r = call(srv, "prompts/list", modernParams(ProtocolVersion, "t", "1.0"))
+    check r["result"]["prompts"].len == 0
+
+  test "every prompt has a name and description":
+    let srv = promptServer()
+    let r = call(srv, "prompts/list", modernParams(ProtocolVersion, "t", "1.0"))
     let prompts = r["result"]["prompts"]
-    check prompts.len > 0
+    check prompts.len == 1
     for p in prompts:
       check p["name"].getStr.len > 0
       check p["description"].getStr.len > 10
 
   test "arguments are declared with required flags":
-    let srv = newMcpServer()
+    let srv = promptServer()
     let r = call(srv, "prompts/list", modernParams(ProtocolVersion, "t", "1.0"))
     var sawRequired = false
     for p in r["result"]["prompts"]:
@@ -51,16 +75,15 @@ suite "prompts/list":
     check sawRequired
 
   test "order is deterministic":
-    let srv = newMcpServer()
+    let srv = promptServer()
     let a = call(srv, "prompts/list", modernParams(ProtocolVersion, "t", "1.0"))
     let b = call(srv, "prompts/list", modernParams(ProtocolVersion, "t", "1.0"))
     check $a == $b
 
 suite "prompts/get":
   test "returns user messages with text content":
-    let srv = newMcpServer()
-    let r = getPrompt(srv, "diagnose_document",
-      argsWith({"format": "yaml", "source": "a: [1"}))
+    let srv = promptServer()
+    let r = getPrompt(srv, "tour", argsWith({"place": "here"}))
     check r["result"]["messages"].len > 0
     let m = r["result"]["messages"][0]
     check m["role"].getStr == "user"
@@ -68,23 +91,19 @@ suite "prompts/get":
     check m["content"]["text"].getStr.len > 20
 
   test "the prompt interpolates its arguments":
-    let srv = newMcpServer()
-    let r = getPrompt(srv, "convert_document",
-      argsWith({"from": "yaml", "to": "toml", "source": "a: 1"}))
+    let srv = promptServer()
+    let r = getPrompt(srv, "tour", argsWith({"place": "there"}))
     let text = r["result"]["messages"][0]["content"]["text"].getStr
-    check text.contains("yaml")
-    check text.contains("toml")
-    check text.contains("a: 1")
+    check text.contains("there")
 
   test "a missing required argument is invalid params":
-    let srv = newMcpServer()
-    let r = getPrompt(srv, "diagnose_document",
-      argsWith({"format": "yaml"}))
+    let srv = promptServer()
+    let r = getPrompt(srv, "tour", newJObject())
     check r["error"]["code"].getInt == -32602
 
   test "no arguments at all is invalid params":
-    let srv = newMcpServer()
-    let r = getPrompt(srv, "diagnose_document")
+    let srv = promptServer()
+    let r = getPrompt(srv, "tour")
     check r["error"]["code"].getInt == -32602
 
   test "an unknown prompt is invalid params":
@@ -98,7 +117,7 @@ suite "prompts/get":
     check r["error"]["code"].getInt == -32602
 
   test "every registered prompt resolves":
-    let srv = newMcpServer()
+    let srv = promptServer()
     for p in srv.prompts.listJson:
       # Supply every declared argument so validation passes.
       var args = newJObject()
@@ -110,8 +129,8 @@ suite "prompts/get":
 
 suite "prompt text quality":
   test "prompts name concrete tools":
-    let reg = buildPromptRegistry()
-    for e in reg.entries:
+    let srv = promptServer()
+    for e in srv.prompts.entries:
       # Supply every declared argument; a resolver validates before returning.
       var args = newJObject()
       for a in e.prompt.arguments:
@@ -124,29 +143,41 @@ suite "prompt text quality":
           hasBacktick = true
       check hasBacktick
 
-  test "formatList names real formats":
-    let list = formatList()
-    for f in ["json", "yaml", "toml"]:
-      check list.contains(f)
-
 suite "resources over the wire":
-  test "resources/list returns the datcontext resources":
+  test "a bare server lists no resources":
     let srv = newMcpServer()
     let r = call(srv, "resources/list", modernParams(ProtocolVersion, "t", "1.0"))
-    check r["result"]["resources"].len > 0
+    check r["result"]["resources"].len == 0
+
+  test "apps register their own resources":
+    let srv = newMcpServer()
+    srv.resources.add(Resource(uri: "example://hello", name: "hello",
+      title: "Hello", description: "A test resource.", mimeType: "text/plain"))
+    srv.resources.addReader("example://",
+      proc(uri: string): ResourceContents =
+        ResourceContents(uri: uri, mimeType: "text/plain", text: "hello"))
+    let r = call(srv, "resources/list", modernParams(ProtocolVersion, "t", "1.0"))
+    check r["result"]["resources"].len == 1
 
   test "resources/templates/list returns templates":
     let srv = newMcpServer()
+    srv.resources.addTemplate(ResourceTemplate(uriTemplate: "example://{id}",
+      name: "Examples", description: "Example items.", mimeType: "text/plain"))
     let r = call(srv, "resources/templates/list",
                  modernParams(ProtocolVersion, "t", "1.0"))
-    check r["result"]["resourceTemplates"].len > 0
+    check r["result"]["resourceTemplates"].len == 1
 
   test "resources/read returns contents":
     let srv = newMcpServer()
+    srv.resources.add(Resource(uri: "example://hello", name: "hello",
+      title: "Hello", description: "A test resource.", mimeType: "text/plain"))
+    srv.resources.addReader("example://",
+      proc(uri: string): ResourceContents =
+        ResourceContents(uri: uri, mimeType: "text/plain", text: "hello"))
     var params = modernParams(ProtocolVersion, "t", "1.0")
-    params["uri"] = newJString("datcontext://formats/toml/sample")
+    params["uri"] = newJString("example://hello")
     let r = call(srv, "resources/read", params)
-    check r["result"]["contents"][0]["text"].getStr.contains("key")
+    check r["result"]["contents"][0]["text"].getStr == "hello"
 
   test "a missing resource is invalid params, not an empty array":
     # The spec forbids an empty `contents` array for a non-existent resource.

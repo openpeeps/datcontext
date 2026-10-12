@@ -1,4 +1,4 @@
-# datcontext — MCP client/server exposing openparser over powpow transports.
+# datcontext — generic MCP building blocks over powpow transports.
 #
 # (c) 2026 George Lemon | MIT License
 #          Made by Humans from OpenPeeps
@@ -7,15 +7,12 @@
 ## Prompts.
 ##
 ## Prompts are user-controlled: the host decides when to offer one, and the
-## server supplies the text. For a document parser the useful ones are workflows
-## rather than single tool calls, since a model can already call the tools
-## directly. Each prompt here names the tools it expects and states what to do
-## with the result, which is the part a bare tool call cannot express.
+## server supplies the text. A bare server ships no prompts; higher-level apps
+## register their own workflows via `add`, since only the app knows which
+## tools its prompts should name.
 
-import std/[strutils, sequtils]
 import openparser/json
 import ./protocol/errors
-import ./tools/formats
 
 type
   PromptArgument* = object
@@ -154,151 +151,9 @@ proc userMsg*(text: string): PromptMessage =
   ## A single user message.
   PromptMessage(role: "user", text: text)
 
-proc formatList*(): string =
-  ## A compact format list for prompt text.
-  result = formats().mapIt(it.name).join(", ")
-
 proc buildPromptRegistry*(): PromptRegistry =
-  ## The standard prompt set.
-  result = newPromptRegistry()
-  # Resolvers are closures, and inside them `result` would refer to their own
-  # PromptResult rather than the registry, so bind the registry to a local.
-  let reg = result
-
-  result.add(
-    Prompt(name: "diagnose_document",
-      title: "Diagnose a document",
-      description: "Find out why a document will not parse, then fix it.",
-      arguments: @[
-        PromptArgument(name: "format", description: "The document format.",
-                       required: true),
-        PromptArgument(name: "source", description: "The document text.",
-                       required: true),
-      ]),
-    proc(args: JsonNode): PromptResult =
-      let fmt = reg.argOf(args, "format")
-      let src = reg.argOf(args, "source")
-      PromptResult(
-        description: "Diagnose why this " & fmt & " document fails to parse",
-        messages: @[userMsg(
-          "This " & fmt & " document does not parse. Work through it in order:" &
-          "\n\n1. Call `validate_" & fmt & "` on the source. It reports the " &
-          "first error with a line and column and shows the offending text." &
-          "\n2. Read the caret in the error output: it points at the exact " &
-          "column that failed." &
-          "\n3. If the error is about nesting, re-run with `maxDepth` raised, " &
-          "since openparser bounds depth for some formats." &
-          "\n4. If the format is wrong, call `list_formats` and pick the one " &
-          "that actually matches." &
-          "\n5. Once it parses, call `normalize_" & fmt & "` to canonicalize " &
-          "it, so later edits produce a minimal diff." &
-          "\n\nSource:" &
-          "\n```" & fmt & "\n" & src & "\n```")]))
-
-  result.add(
-    Prompt(name: "convert_document",
-      title: "Convert between formats",
-      description: "Move a document from one format to another.",
-      arguments: @[
-        PromptArgument(name: "from", description: "Source format.",
-                       required: true),
-        PromptArgument(name: "to", description: "Target format.",
-                       required: true),
-        PromptArgument(name: "source", description: "The document text.",
-                       required: true),
-      ]),
-    proc(args: JsonNode): PromptResult =
-      let srcFmt = reg.argOf(args, "from")
-      let dstFmt = reg.argOf(args, "to")
-      let src = reg.argOf(args, "source")
-      PromptResult(
-        description: "Convert " & srcFmt & " to " & dstFmt,
-        messages: @[userMsg(
-          "Convert this document from " & srcFmt & " to " & dstFmt & "." &
-          "\n\nopenparser does not have a universal transcode bus, so convert " &
-          "in two hops and be explicit about which you use:" &
-          "\n\n1. `parse_" & srcFmt & "` the source and take the canonical text." &
-          "\n2. `parse_" & dstFmt & "` that text." &
-          "\n3. `normalize_" & dstFmt & "` the result so the output is canonical." &
-          "\n\nIf step 2 fails, say which construct has no equivalent in " &
-          dstFmt & " rather than dropping it silently." &
-          "\n\nSource:" &
-          "\n```" & srcFmt & "\n" & src & "\n```")]))
-
-  result.add(
-    Prompt(name: "review_config",
-      title: "Review a configuration file",
-      description: "Check a config file and describe what it does.",
-      arguments: @[
-        PromptArgument(name: "format",
-          description: "Config format: yaml, toml, json, or dotenv.",
-          required: true),
-        PromptArgument(name: "path",
-          description: "Path to the config file.",
-          required: true),
-      ]),
-    proc(args: JsonNode): PromptResult =
-      let fmt = reg.argOf(args, "format")
-      let path = reg.argOf(args, "path")
-      PromptResult(
-        description: "Review this " & fmt & " config",
-        messages: @[userMsg(
-          "Review the " & fmt & " config at " & path & "." &
-          "\n\n1. `validate_" & fmt & "` it first; do not review a file that " &
-          "does not parse." &
-          "\n2. `parse_" & fmt & "` it to get the canonical structure and a " &
-          "key summary." &
-          "\n3. Report: what the file configures, any keys that look wrong or " &
-          "contradict each other, and anything sensitive enough to move to an " &
-          "environment variable." &
-          "\n4. Quote the offending line for each finding so it can be found.")]))
-
-  result.add(
-    Prompt(name: "explain_parse_error",
-      title: "Explain a parse error",
-      description: "Turn a parser error into an actionable explanation.",
-      arguments: @[
-        PromptArgument(name: "format", description: "The document format.",
-                       required: true),
-        PromptArgument(name: "error", description: "The parser error text.",
-                       required: true),
-      ]),
-    proc(args: JsonNode): PromptResult =
-      let fmt = reg.argOf(args, "format")
-      let err = reg.argOf(args, "error")
-      PromptResult(
-        description: "Explain this " & fmt & " parse error",
-        messages: @[userMsg(
-          "Explain this " & fmt & " parse error and how to fix it:" &
-          "\n\n```\n" & err & "\n```" &
-          "\n\nopenparser reports errors with a caret under the failing " &
-          "column and a line:col pair. Use both." &
-          "\n\n1. Point at the caret's column and quote the offending text." &
-          "\n2. Say what the parser expected at that position in " & fmt & "." &
-          "\n3. Give the minimal edit that fixes it." &
-          "\n4. If the error is a nesting-depth limit, say so: only " &
-          "json, yaml, toml, plist, and nif are depth-bounded in this " &
-          "server, and the bound is raised with `maxDepth`.")]))
-
-  result.add(
-    Prompt(name: "select_parser",
-      title: "Choose a parser",
-      description: "Pick the right tool for an unfamiliar file.",
-      arguments: @[
-        PromptArgument(name: "path",
-          description: "Path or description of the file.", required: true),
-      ]),
-    proc(args: JsonNode): PromptResult =
-      let path = reg.argOf(args, "path")
-      PromptResult(
-        description: "Choose a parser for " & path,
-        messages: @[userMsg(
-          "Work out how to read " & path & "." &
-          "\n\n1. Call `list_formats`. It returns every supported format with " &
-          "its MIME type, and a `depthBounded` flag telling you whether a " &
-          "nesting limit is enforced." &
-          "\n2. Match the extension or content against those MIME types." &
-          "\n3. If several fit, `validate_` each candidate and keep the ones " &
-          "that pass." &
-          "\n4. Report the single best tool and the runner-up, with the " &
-          "evidence for each.")]))
+  ## The standard prompt set: empty.
+  ##
+  ## Higher-level apps add their own prompts on top, since prompt text
+  ## names app-specific tools and workflows.
+  newPromptRegistry()

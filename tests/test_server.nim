@@ -2,6 +2,7 @@ import unittest, strutils, tables
 import openparser/json
 import ../src/datcontext/protocol/[errors, meta, types, version]
 import ../src/datcontext/server/core
+import ../src/datcontext/tools/tool
 
 proc call(srv: McpServer; methodName: string;
           params: JsonNode = nil): JsonNode =
@@ -12,6 +13,18 @@ proc call(srv: McpServer; methodName: string;
   if not params.isNil:
     msg["params"] = params
   srv.handleMessage(msg)
+
+proc echoServer(): McpServer =
+  ## A server with one app-specific tool, for tools/call coverage.
+  result = newMcpServer()
+  result.registry.register("echo",
+    "Echo a message back.",
+    objSchema(properties = props(("message", stringProp("Message to echo."))),
+              required = @["message"]),
+    proc(args: JsonNode): ToolResult =
+      okStructured("got:" & argStr(args, "message"),
+                   %*{"message": argStr(args, "message")}),
+    title = "Echo")
 
 suite "server/discover":
   test "advertises versions, capabilities, and identity":
@@ -33,20 +46,17 @@ suite "server/discover":
     check not r.hasKey("error")
 
 suite "tools/list":
-  test "bare server starts with no tools, openparser bundle is opt-in":
-    let bare = newMcpServer()
-    check bare.registry.tools.len == 0
-    let full = newMcpServer(withOpenParserTools = true)
-    check full.registry.tools.len == 36
-    full.registerOpenParserTools()
-    check full.registry.tools.len == 36
+  test "a bare server starts with no tools":
+    let srv = newMcpServer()
+    check srv.registry.tools.len == 0
 
   test "returns registered tools in stable order":
-    let srv = newMcpServer(withOpenParserTools = true)
+    let srv = echoServer()
     let r = call(srv, "tools/list", modernParams(ProtocolVersion, "c", "1.0"))
     let tools = r["result"]["tools"]
     check tools.len == len(srv.registry.tools)
-    check tools.len > 0
+    check tools.len == 1
+    check tools[0]["name"].getStr == "echo"
     # Deterministic across calls.
     let r2 = call(srv, "tools/list", modernParams(ProtocolVersion, "c", "1.0"))
     check $tools == $r2["result"]["tools"]
@@ -63,10 +73,10 @@ suite "tools/list":
 
 suite "tools/call":
   test "calls a tool and returns content":
-    let srv = newMcpServer(withOpenParserTools = true)
+    let srv = echoServer()
     var params = modernParams(ProtocolVersion, "c", "1.0")
-    params["name"] = newJString("parse_json")
-    params["arguments"] = %*{"source": "{\"a\":1}"}
+    params["name"] = newJString("echo")
+    params["arguments"] = %*{"message": "hi"}
     let r = call(srv, "tools/call", params)
     check r["result"]["content"][0]["type"].getStr == "text"
     check r["result"].hasKey("structuredContent")
@@ -86,36 +96,23 @@ suite "tools/call":
     let r = call(srv, "tools/call", modernParams(ProtocolVersion, "c", "1.0"))
     check r["error"]["code"].getInt == -32602
 
-  test "parse failure is a tool execution error the model can act on":
-    let srv = newMcpServer(withOpenParserTools = true)
+  test "handler failure is a tool execution error the model can act on":
+    let srv = echoServer()
     var params = modernParams(ProtocolVersion, "c", "1.0")
-    params["name"] = newJString("parse_json")
-    params["arguments"] = %*{"source": "{not json"}
+    params["name"] = newJString("echo")
+    params["arguments"] = %*{"message": 42}
     let r = call(srv, "tools/call", params)
     # isError lets the model self-correct; a protocol error would not.
     check r["result"]["isError"].getBool
     check not r.hasKey("error")
 
   test "bad arguments become a tool error, not a protocol error":
-    let srv = newMcpServer(withOpenParserTools = true)
+    let srv = echoServer()
     var params = modernParams(ProtocolVersion, "c", "1.0")
-    params["name"] = newJString("parse_json")
-    params["arguments"] = %*{"source": "x", "path": "y"}
-    let r = call(srv, "tools/call", params)
-    check r["result"]["isError"].getBool
-
-  test "list_formats reports depth bounds honestly":
-    let srv = newMcpServer(withOpenParserTools = true)
-    var params = modernParams(ProtocolVersion, "c", "1.0")
-    params["name"] = newJString("list_formats")
+    params["name"] = newJString("echo")
     params["arguments"] = newJObject()
     let r = call(srv, "tools/call", params)
-    let formats = r["result"]["structuredContent"]["formats"]
-    var sawUnbounded = false
-    for f in formats:
-      if not f["depthBounded"].getBool:
-        sawUnbounded = true
-    check sawUnbounded
+    check r["result"]["isError"].getBool
 
 suite "dual-era":
   test "legacy initialize returns an InitializeResult without resultType":
@@ -138,12 +135,12 @@ suite "dual-era":
     check r["result"]["protocolVersion"].getStr == "2024-11-05"
 
   test "legacy client can call tools without modern _meta":
-    let srv = newMcpServer(withOpenParserTools = true)
+    let srv = echoServer()
     discard call(srv, "initialize",
       %*{"protocolVersion": "2025-06-18", "capabilities": newJObject()})
     discard srv.handleMessage(%*{"jsonrpc": "2.0", "method": "notifications/initialized"})
     let r = call(srv, "tools/list", newJObject())
-    check r["result"]["tools"].len > 0
+    check r["result"]["tools"].len == 1
 
   test "notifications/initialized is tracked":
     let srv = newMcpServer()

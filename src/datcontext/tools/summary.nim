@@ -1,4 +1,4 @@
-# datcontext — MCP client/server exposing openparser over powpow transports.
+# datcontext — generic MCP building blocks over powpow transports.
 #
 # (c) 2026 George Lemon | MIT License
 #          Made by Humans from OpenPeeps
@@ -6,11 +6,9 @@
 
 ## Shallow structural summaries.
 ##
-## openparser's AST types each have their own shape, and rewriting them all into
-## `JsonNode` would duplicate the whole converter surface. Instead, `parse` tools
-## return openparser's own canonical rendering as the text block, and add a small
-## summary so the model gets document shape (keys, counts, nesting) without the
-## server reconstructing the tree.
+## Small helpers for tool results: a bounded text preview and a shallow
+## `JsonNode` summary (kind, key names, length) so the model gets document
+## shape without the server reconstructing the tree.
 
 import openparser/json
 

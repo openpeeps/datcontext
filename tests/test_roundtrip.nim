@@ -5,10 +5,12 @@ import ../src/datcontext/client/[core, http, spawn, stream]
 import ../src/datcontext/protocol/[errors, meta, version]
 import ../src/datcontext/server/core
 import ../src/datcontext/tools/tool
+import ../src/datcontext/prompts
+import ../src/datcontext/resources
 
 const
   # datcontext itself ships no binary (library only). Transport round trips
-  # spawn the example high-level app, which opts in to the openparser bundle.
+  # spawn the example high-level app.
   ServerBin = "bin/example_full_server"
 
 suite "round trip against a real spawned server":
@@ -32,7 +34,7 @@ suite "round trip against a real spawned server":
     defer: closeClient(c)
     c.connect()
     let tools = c.listTools()["result"]["tools"]
-    check tools.len > 10
+    check tools.len == 3
     # Every tool must carry a usable schema on the wire, not just in-process.
     for t in tools:
       check t["name"].getStr.len > 0
@@ -44,11 +46,10 @@ suite "round trip against a real spawned server":
     let c = spawnServer(ServerBin, ["stdio"])
     defer: closeClient(c)
     c.connect()
-    let r = c.callTool("parse_json", %*{"source": "{\"a\": 1}"})["result"]
+    let r = c.callTool("example_greet", %*{"name": "wire"})["result"]
     check not r.hasKey("isError")
     check r["content"][0]["type"].getStr == "text"
-    check r["structuredContent"]["kind"].getStr == "object"
-    check r["structuredContent"]["keys"][0].getStr == "a"
+    check r["structuredContent"]["name"].getStr == "wire"
 
   test "several requests interleave correctly over one pipe":
     if not fileExists(ServerBin):
@@ -58,21 +59,21 @@ suite "round trip against a real spawned server":
     c.connect()
     # Reply correlation must not mix these up.
     for i in 0 ..< 5:
-      let r = c.callTool("parse_json", %*{"source": "{\"n\": " & $i & "}"})
-      let v = r["result"]["structuredContent"]["keys"][0].getStr
-      check v == "n"
+      let r = c.callTool("example_greet", %*{"name": "n" & $i})
+      let v = r["result"]["structuredContent"]["name"].getStr
+      check v == "n" & $i
 
-  test "a parse failure comes back as a tool error, not a crash":
+  test "a tool error comes back as a tool error, not a crash":
     if not fileExists(ServerBin):
       skip()
     let c = spawnServer(ServerBin, ["stdio"])
     defer: closeClient(c)
     c.connect()
-    let r = c.callTool("parse_json", %*{"source": "{not json"})["result"]
-    # The server must stay up: a malformed document is a tool error.
+    let r = c.callTool("example_greet", %*{"name": ""})["result"]
+    # The server must stay up: a bad argument is a tool error.
     check r["isError"].getBool
     # And the connection is still usable afterwards.
-    check c.callTool("list_formats", newJObject())["result"].hasKey("content")
+    check c.callTool("example_greet", %*{"name": "again"})["result"].hasKey("content")
 
   test "a legacy client drives the same server":
     if not fileExists(ServerBin):
@@ -84,7 +85,7 @@ suite "round trip against a real spawned server":
     c.protocolVersion = "2025-06-18"
     discard c.initialize()
     check c.initialized
-    check c.listTools()["result"]["tools"].len > 10
+    check c.listTools()["result"]["tools"].len == 3
 
 suite "live transports against running servers":
   # These spawn the built binary on each transport and drive it with the real
@@ -104,10 +105,10 @@ suite "live transports against running servers":
     sleep(600)
     let c = connectHttp("http://127.0.0.1:" & $port)
     check c.probe() == "modern"
-    # 36 openparser tools plus 3 example app tools.
-    check c.listTools()["result"]["tools"].len == 39
-    let reply = c.callTool("parse_yaml", %*{"source": "a: 1"})
-    check reply["result"]["content"][0]["text"].getStr.contains("a:")
+    # The three example app tools.
+    check c.listTools()["result"]["tools"].len == 3
+    let reply = c.callTool("example_greet", %*{"name": "http"})
+    check reply["result"]["content"][0]["text"].getStr.contains("http")
 
   test "tcp":
     if not fileExists(ServerBin):
@@ -120,9 +121,9 @@ suite "live transports against running servers":
 
     let c = connectTcpClient("127.0.0.1", port)
     check c.probe() == "modern"
-    check c.listTools()["result"]["tools"].len == 39
-    let reply = c.callTool("parse_toml", %*{"source": "a = 1"})
-    check reply["result"]["content"][0]["text"].getStr.contains("a = 1")
+    check c.listTools()["result"]["tools"].len == 3
+    let reply = c.callTool("example_greet", %*{"name": "tcp"})
+    check reply["result"]["content"][0]["text"].getStr.contains("tcp")
 
   test "unix domain socket":
     if not fileExists(ServerBin):
@@ -138,13 +139,20 @@ suite "live transports against running servers":
 
     let c = connectUnixClient(path)
     check c.probe() == "modern"
-    check c.listTools()["result"]["tools"].len == 39
-    let reply = c.callTool("parse_xml", %*{"source": "<a>hi</a>"})
-    check reply["result"]["content"][0]["text"].getStr.contains("<a>")
+    check c.listTools()["result"]["tools"].len == 3
+    let reply = c.callTool("example_greet", %*{"name": "unix"})
+    check reply["result"]["content"][0]["text"].getStr.contains("unix")
 
 suite "resources and prompts over the wire":
   test "resources/list and resources/read":
     let srv = newMcpServer()
+    srv.resources.add(Resource(uri: "example://hello", name: "hello",
+      title: "Hello",
+      description: "A test resource.",
+      mimeType: "text/plain"))
+    srv.resources.addReader("example://",
+      proc(uri: string): ResourceContents =
+        ResourceContents(uri: uri, mimeType: "text/plain", text: "hello"))
     let c = newClient(ClientTransport(
       kind: "inproc", send: proc(m: JsonNode): JsonNode =
         srv.handleMessage(m)))
@@ -156,20 +164,28 @@ suite "resources and prompts over the wire":
     msg["method"] = newJString("resources/list")
     msg["params"] = c.modernParams()
     let list = c.send(msg)["result"]["resources"]
-    check list.len > 0
+    check list.len == 1
 
     var rp = c.modernParams()
-    rp["uri"] = newJString("datcontext://formats/json/sample")
+    rp["uri"] = newJString("example://hello")
     var rm = newJObject()
     rm["jsonrpc"] = newJString("2.0")
     rm["id"] = newJInt(2)
     rm["method"] = newJString("resources/read")
     rm["params"] = rp
     let read = c.send(rm)["result"]["contents"]
-    check read[0]["text"].getStr.contains("key")
+    check read[0]["text"].getStr == "hello"
 
   test "prompts/list and prompts/get":
     let srv = newMcpServer()
+    srv.prompts.add(
+      Prompt(name: "tour", title: "Tour",
+        description: "Tour the server.",
+        arguments: @[PromptArgument(name: "place",
+          description: "A place.", required: true)]),
+      proc(args: JsonNode): PromptResult =
+        PromptResult(description: "Tour",
+          messages: @[userMsg("welcome to " & srv.prompts.argOf(args, "place"))]))
     let c = newClient(ClientTransport(
       kind: "inproc", send: proc(m: JsonNode): JsonNode =
         srv.handleMessage(m)))
@@ -180,18 +196,18 @@ suite "resources and prompts over the wire":
     pm["id"] = newJInt(3)
     pm["method"] = newJString("prompts/list")
     pm["params"] = c.modernParams()
-    check c.send(pm)["result"]["prompts"].len > 0
+    check c.send(pm)["result"]["prompts"].len == 1
 
     var gp = c.modernParams()
-    gp["name"] = newJString("explain_parse_error")
-    gp["arguments"] = %*{"format": "toml", "error": "boom"}
+    gp["name"] = newJString("tour")
+    gp["arguments"] = %*{"place": "here"}
     var gm = newJObject()
     gm["jsonrpc"] = newJString("2.0")
     gm["id"] = newJInt(4)
     gm["method"] = newJString("prompts/get")
     gm["params"] = gp
     let got = c.send(gm)["result"]
-    check got["messages"][0]["content"]["text"].getStr.contains("boom")
+    check got["messages"][0]["content"]["text"].getStr.contains("here")
 
 suite "subscriptions against a real spawned server":
   test "the ack is written before anything else on the channel":

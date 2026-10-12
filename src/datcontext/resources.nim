@@ -1,4 +1,4 @@
-# datcontext — MCP client/server exposing openparser over powpow transports.
+# datcontext — generic MCP building blocks over powpow transports.
 #
 # (c) 2026 George Lemon | MIT License
 #          Made by Humans from OpenPeeps
@@ -7,15 +7,9 @@
 ## Resources.
 ##
 ## Resources are the read side of MCP: URI-addressed context a client can pull in
-## without invoking a tool. A few are exposed here.
-##
-## * `datcontext://formats` — the supported format table as JSON. Stable and
-##   cheap, so a host can read it to render a picker.
-## * `datcontext://formats/{name}/sample` — a minimal valid document per format,
-##   which is what a model needs in order to learn a format's shape before
-##   parsing real data.
-## * `file://` resources under a configured root, which is what makes the server
-##   useful against real files.
+## without invoking a tool. A bare server ships no resources; higher-level apps
+## register their own, and optionally enable `file://` resources under a
+## configured root, which is what makes a server useful against real files.
 ##
 ## The `file://` handler is the security-sensitive one. It is backed by
 ## flysystem: a `LocalDriver` rooted at a directory, wrapped in a
@@ -33,7 +27,6 @@ import std/[os, strutils, tables, uri]
 import flysystem
 import openparser/json
 import ./protocol/errors
-import ./tools/formats
 
 const
   ResourceDisk* = "resources"
@@ -183,15 +176,6 @@ proc fileUriToRelative*(uri: string): string =
     relative = relative[1 .. ^1]
   relative
 
-proc formatMimeType*(name: string): string =
-  ## The MIME type registered for a format in the format table, or
-  ## `text/plain` when unknown. Single source of truth: no second
-  ## extension-to-MIME table is kept here.
-  for f in formats():
-    if f.name == name:
-      return f.mimeType
-  "text/plain"
-
 proc readFileResource*(reg: ResourceRegistry; uri: string): ResourceContents =
   ## Read a `file://` resource through flysystem.
   ##
@@ -234,33 +218,6 @@ proc readFileResource*(reg: ResourceRegistry; uri: string): ResourceContents =
   ResourceContents(uri: uri, mimeType: disk.mimeType(relative),
                    text: content)
 
-proc formatsJson*(): JsonNode =
-  ## The format table, as served by `datcontext://formats`.
-  result = newJObject()
-  result["count"] = newJInt(formats().len)
-  var arr = newJArray()
-  for f in formats():
-    var o = newJObject()
-    o["name"] = newJString(f.name)
-    o["mimeType"] = newJString(f.mimeType)
-    o["description"] = newJString(f.description)
-    o["depthBounded"] = newJBool(f.depthBounded)
-    arr.add(o)
-  result["formats"] = arr
-
-proc sampleFor*(name: string): string =
-  ## A minimal valid document for a format, for the sample resource.
-  case name
-  of "json": "{\n  \"key\": \"value\"\n}"
-  of "yaml": "key: value"
-  of "toml": "key = \"value\""
-  of "xml": "<root><key>value</key></root>"
-  of "html": "<!DOCTYPE html>\n<html><body><p>text</p></body></html>"
-  of "css": "selector {\n  property: value;\n}"
-  of "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"></svg>"
-  of "sql": "SELECT column FROM table WHERE condition;"
-  else: ""
-
 proc contentsJson*(contents: seq[ResourceContents]): JsonNode =
   ## Render resource bodies for a `resources/read` result.
   result = newJArray()
@@ -279,10 +236,15 @@ proc read*(reg: ResourceRegistry; uri: string): seq[ResourceContents] =
   ## Raises `McpError` with `-32602` when the URI is unknown or the file is
   ## missing, which is what the spec requires for a non-existent resource.
   if uri in reg.resources:
-    let reader = reg.readers[uri]
-    if reader.isNil:
-      raise newMcpError(ecInvalidParams, "Resource has no reader: " & uri)
-    return @[reader(uri)]
+    if uri in reg.readers:
+      let reader = reg.readers[uri]
+      if reader.isNil:
+        raise newMcpError(ecInvalidParams, "Resource has no reader: " & uri)
+      return @[reader(uri)]
+    let prefix = reg.matchesPrefix(uri)
+    if prefix.len > 0:
+      return @[reg.readers[prefix](uri)]
+    raise newMcpError(ecInvalidParams, "Resource has no reader: " & uri)
   let prefix = reg.matchesPrefix(uri)
   if prefix.len == 0:
     raise newMcpError(ecInvalidParams, "Resource not found")
@@ -290,41 +252,13 @@ proc read*(reg: ResourceRegistry; uri: string): seq[ResourceContents] =
 
 proc buildResourceRegistry*(fileRoot: string = "";
                            policy = defaultFilePolicy()): ResourceRegistry =
-  ## The standard resource set.
+  ## The standard resource set: empty, plus optional `file://` resources.
   ##
   ## `fileRoot` enables `file://` resources through a flysystem disk rooted
   ## there. Leave it empty to disable filesystem resources entirely, which is the
-  ## right default for a server a model drives.
+  ## right default for a server a model drives. Higher-level apps register
+  ## their own URI schemes on top via `add`/`addReader`/`addTemplate`.
   result = newResourceRegistry()
-
-  result.addReader("datcontext://formats/",
-    proc(uri: string): ResourceContents =
-      var name = uri["datcontext://formats/".len .. ^1]
-      if name.endsWith("/sample"):
-        # Strip the suffix from the end, not the start.
-        name = name[0 ..< name.len - "/sample".len]
-      let sample = sampleFor(name)
-      if sample.len == 0:
-        raise newMcpError(ecInvalidParams, "Unknown format: " & name)
-      ResourceContents(uri: uri, mimeType: formatMimeType(name),
-                       text: sample))
-
-  result.addReader("datcontext://formats",
-    proc(uri: string): ResourceContents =
-      ResourceContents(uri: uri, mimeType: "application/json",
-                       text: $formatsJson()))
-
-  result.add(Resource(uri: "datcontext://formats", name: "formats",
-    title: "Supported formats",
-    description: "Every document format this server can parse, with MIME " &
-                 "types and whether a nesting-depth bound is enforced.",
-    mimeType: "application/json"))
-
-  result.addTemplate(ResourceTemplate(
-    uriTemplate: "datcontext://formats/{format}/sample",
-    name: "Format samples",
-    description: "A minimal valid document for a given format.",
-    mimeType: "text/plain"))
 
   if fileRoot.len > 0:
     # Bind the registry to a local: inside the closure `result` would refer to

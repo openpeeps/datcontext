@@ -64,29 +64,36 @@ suite "client era detection":
 
 suite "client requests over a modern server":
   test "tools/list works after probing":
-    let srv = newMcpServer(withOpenParserTools = true)
+    let srv = newMcpServer()
+    srv.registry.register("echo", "Echo.", objSchema(),
+      proc(args: JsonNode): ToolResult = okResult("hi"))
     let c = newClient(ClientTransport(
       kind: "inproc",
       send: proc(msg: JsonNode): JsonNode = srv.handleMessage(msg)))
     c.connect()
     let tools = c.listTools()["result"]["tools"]
-    check tools.len > 0
+    check tools.len == 1
     # Every modern request must carry the required _meta.
     check tools.len == len(srv.registry.names())
 
   test "tools/call round trips through a real server":
-    let srv = newMcpServer(withOpenParserTools = true)
+    let srv = newMcpServer()
+    srv.registry.register("echo", "Echo.",
+      objSchema(properties = props(("message", stringProp("Message.")))),
+      proc(args: JsonNode): ToolResult = okResult(argStr(args, "message")))
     let c = newClient(ClientTransport(
       kind: "inproc",
       send: proc(msg: JsonNode): JsonNode = srv.handleMessage(msg)))
     c.connect()
-    let r = c.callTool("parse_yaml", %*{"source": "a: 1"})["result"]
+    let r = c.callTool("echo", %*{"message": "hi"})["result"]
     # `isError` is omitted on success, not set to false.
     check not r.hasKey("isError")
-    check r["content"][0]["text"].getStr.contains("a:")
+    check r["content"][0]["text"].getStr == "hi"
 
   test "a legacy client can still list tools":
-    let srv = newMcpServer(withOpenParserTools = true)
+    let srv = newMcpServer()
+    srv.registry.register("echo", "Echo.", objSchema(),
+      proc(args: JsonNode): ToolResult = okResult("hi"))
     let c = newClient(ClientTransport(
       kind: "inproc",
       send: proc(msg: JsonNode): JsonNode =

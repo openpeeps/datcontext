@@ -1,13 +1,12 @@
-# datcontext — MCP client/server exposing openparser over powpow transports.
+# datcontext — generic MCP building blocks over powpow transports.
 #
 # (c) 2026 George Lemon | MIT License
 #          Made by Humans from OpenPeeps
 #          https://github.com/openpeeps/datcontext
 
-## Format source loading, size bounds, and parse-error classification.
+## Tool input loading and size bounds.
 ##
-## Every openparser text parser takes a `string`, and only some expose a `*File`
-## entry point. Tools therefore share one loader that accepts either inline
+## Tools that accept document text share one loader that takes either inline
 ## `source` or a `path`, and applies a shared byte ceiling so a model cannot ask
 ## the server to pull an arbitrarily large file into memory.
 ##
@@ -20,7 +19,7 @@ import ../protocol/errors
 
 const
   DefaultMaxSourceBytes* = 32 * 1024 * 1024
-  ## Ceiling on any single document handed to a parser.
+  ## Ceiling on any single document handed to a tool.
 
 proc maxSourceBytes*(): int =
   ## Configurable ceiling, overridable by an environment variable so an operator

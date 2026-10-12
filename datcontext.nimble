@@ -2,7 +2,7 @@
 
 version       = "0.1.0"
 author        = "George Lemon"
-description   = "MCP client/server library over powpow transports with optional openparser tools"
+description   = "Generic MCP client/server library over powpow transports"
 license       = "MIT"
 srcDir        = "src"
 

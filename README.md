@@ -22,22 +22,22 @@
 - Dual era protocol support for the 2026-07-28 revision
   Plus the legacy initialize handshake, useful for connecting current and older hosts without extra setup
 
-- Optional document parsing bundle through 36 openparser tools covering JSON, YAML, TOML,
-  XML, HTML, CSS, SVG, CSV, SQL, iCalendar, vCard, RSS, Atom, dotenv, plist, BSON
-  and NIF, useful for letting an assistant read, check and convert config and data files directly
+- Empty by default, app defined everything
+  A bare server registers no tools, resources or prompts. Higher level libs add their own,
+  for example an openparser backed document bundle, without forking the core
 
-- Generic parse, validate and normalize tools inside the optional bundle that work with any supported format
-  Useful for format detection flows and for producing minimal diff rewrites
+- Tool registry with JSON Schema helpers and guarded handlers
+  Useful for exposing model callable functions with precise schemas while keeping
+  handler failures as model fixable tool errors instead of dropped connections
 
-- Scalar helpers for colors, UUIDs, paths, regular expressions and fuzzy search inside the optional bundle,
-  Useful for small validation and cleanup jobs without writing a parser
+- Shared input helpers for inline source or file path loading with size bounds
+  Useful for tools that accept document text without duplicating validation logic
 
-- Read side resources with per format samples and optional file backed resources
-  Useful for giving a model safe context about available formats and project files
+- Read side resources with optional file backed resources
+  Useful for giving a model safe context about project files
 
-- Five guided prompts for diagnosing documents
-  Converting between formats, reviewing configs, explaining parse errors
-  and picking a parser, useful as slash commands in MCP hosts
+- Guided prompts registered by the app
+  Useful as slash commands in MCP hosts for multi step workflows
 
 - Notification subscriptions on every transport
   Useful for learning when the tool, resource or prompt catalogue changes
@@ -46,8 +46,8 @@
   Hidden file denial and containment checks, useful for exposing a project directory
   without risk of escape through parent paths, symlinks or sibling prefix tricks
 
-- Clear separation of protocol errors and model fixable tool errors with line,
-  column and caret context, useful because a model can see exactly where a document broke
+- Clear separation of protocol errors and model fixable tool errors
+  Useful because a model can see exactly what went wrong and correct itself
 
 ## Examples
 
@@ -68,16 +68,26 @@ srv.registry.register("greet",
     okResult("Hello, " & argStr(args, "name")))
 ```
 
-Opt in to the openparser document tools when you need them:
+Add a resource and a prompt on top:
 
 ```nim
-import datcontext/server/core
+srv.resources.add(Resource(uri: "example://greeting", name: "greeting",
+  title: "Example greeting",
+  description: "A static greeting showing a custom resource and reader.",
+  mimeType: "text/plain"))
+srv.resources.addReader("example://",
+  proc(uri: string): ResourceContents =
+    ResourceContents(uri: uri, mimeType: "text/plain",
+                     text: "hello from the example server"))
 
-# At construction time.
-let srv = newMcpServer(withOpenParserTools = true)
-
-# Or afterwards on an existing server.
-srv.registerOpenParserTools()
+srv.prompts.add(
+  Prompt(name: "tour_server",
+    title: "Tour this example server",
+    description: "Walk through everything this example server offers.",
+    arguments: @[]),
+  proc(args: JsonNode): PromptResult =
+    PromptResult(description: "Tour the example server",
+      messages: @[userMsg("Call `tools/list` first.")]))
 ```
 
 Serve over your preferred transport from your own app binary:
@@ -85,7 +95,7 @@ Serve over your preferred transport from your own app binary:
 ```nim
 import datcontext/server/[core, stdio, http, stream]
 
-let srv = newMcpServer(withOpenParserTools = true)
+let srv = newMcpServer(name = "my-app", version = "0.1.0")
 srv.runStdio()          # speak MCP on stdin/stdout
 srv.runHttp(9000)       # Streamable HTTP
 srv.runUnix("/tmp/mcp.sock")  # Unix domain socket
@@ -99,7 +109,7 @@ import datcontext/client/[core, http]
 
 let c = connectHttp("http://127.0.0.1:9000")
 doAssert c.probe() == "modern"
-let reply = c.callTool("parse_yaml", %*{"source": "a: 1"})
+let reply = c.callTool("greet", %*{"name": "ada"})
 ```
 
 Read a resource and fetch a prompt:
@@ -107,9 +117,9 @@ Read a resource and fetch a prompt:
 ```nim
 import flysystem
 
-let srv = newMcpServer(fileRoot = "/srv/data", withOpenParserTools = true)
-let formats = srv.resources.read("datcontext://formats")
-let prompt = srv.prompts.find("select_parser").resolve(%*{"path": "a.ron"})
+let srv = newMcpServer(fileRoot = "/srv/data")
+let greeting = srv.resources.read("example://greeting")
+let prompt = srv.prompts.find("tour_server").resolve(newJObject())
 
 # Narrow the file disk to config formats only.
 let narrow = buildResourceRegistry("/srv/data",
@@ -145,16 +155,15 @@ data: {"jsonrpc":"2.0","method":"notifications/subscriptions/acknowledged","para
 ## What it is
 
 `datcontext` is a library for building MCP clients and servers, not a CLI app.
-A bare server starts with empty tool registries plus the standard resources
-and prompts. High level apps register their own tools and optionally opt in
-to the openparser document bundle (36 tools covering JSON, YAML, TOML, XML,
-HTML, CSS, SVG, CSV, SQL, iCalendar, vCard, RSS, Atom, dotenv, plist, BSON,
-and NIF, plus scalar helpers for colors, UUIDs, paths, regular expressions,
-and fuzzy search).
+A bare server starts with empty tool, resource and prompt registries. Higher
+level apps register their own tools, resources and prompts, for example by
+adding openparser backed document tools in their own core.
 
 It targets the **2026-07-28** revision of the MCP specification and is
 dual era: it serves modern stateless requests and also answers the legacy
 `initialize` handshake, so current and older hosts both connect.
+
+JSON handling inside uses openparser for JSON.
 
 ## Install
 
@@ -166,10 +175,15 @@ Built with [clue](https://github.com/openpeeps/clue).
 
 ## Resources
 
-Read-side context, URI-addressed. Enabled by default:
+A bare server ships no resources. Apps register their own URI schemes:
 
-- `datcontext://formats` (the format table as JSON)
-- `datcontext://formats/{format}/sample` (a minimal valid document per format)
+```nim
+srv.resources.add(Resource(uri: "example://greeting", name: "greeting",
+  description: "A static greeting.", mimeType: "text/plain"))
+srv.resources.addReader("example://",
+  proc(uri: string): ResourceContents =
+    ResourceContents(uri: uri, mimeType: "text/plain", text: "hello"))
+```
 
 Filesystem resources are **off by default**. Pass `fileRoot` to serve
 `file://` URIs from under a directory:
@@ -192,13 +206,20 @@ refused (see the note at the bottom of this file). A missing file returns
 
 ## Prompts
 
-Five workflows, each naming the tools it expects:
+A bare server ships no prompts. Apps register their own workflows:
 
-`diagnose_document`, `convert_document`, `review_config`, `explain_parse_error`,
-`select_parser`.
+```nim
+srv.prompts.add(
+  Prompt(name: "tour_server",
+    description: "Walk through everything this server offers.",
+    arguments: @[]),
+  proc(args: JsonNode): PromptResult =
+    PromptResult(description: "Tour",
+      messages: @[userMsg("Call `tools/list` first.")]))
+```
 
 They are user-controlled in the protocol's sense (a host offers them as slash
-commands) and each returns a single user message.
+commands) and each returns one or more messages.
 
 ## Subscriptions
 
@@ -230,16 +251,20 @@ only, which the stdio binding requires.
 
 ## Tools
 
-The openparser bundle is optional. Opt in with `withOpenParserTools = true`
-or `registerOpenParserTools()`, then the server exposes 36 tools.
+A bare server registers no tools. Apps add their own with precise JSON Schemas:
 
-Format-specific tools (`parse_yaml`, `validate_toml`, ...) carry precise JSON
-Schemas. Four generic tools work with any supported format:
+```nim
+srv.registry.register("greet",
+  "Greet someone by name.",
+  objSchema(properties = props(
+    ("name", stringProp("Who to greet.")))),
+  proc(args: JsonNode): ToolResult =
+    okResult("Hello, " & argStr(args, "name")))
+```
 
-- `list_formats` (every format, with MIME type and whether a depth bound exists)
-- `parse` (parse and canonically render)
-- `validate` (report the first error with line and column)
-- `normalize` (idempotent canonical output, useful for minimal-diff rewrites)
+Shared helpers live in `tools/load.nim` (`readSource` for inline source or
+file path input with size bounds) and `tools/summary.nim` (bounded previews
+and shallow JSON summaries).
 
 ### Error reporting
 
@@ -249,11 +274,11 @@ apart:
 - **Protocol errors** (JSON-RPC `-32602` etc.) for malformed requests and
   unknown tool names.
 - **Tool execution errors** (`isError: true`) for everything a model can fix:
-  a bad argument, an unparseable document. These carry openparser's caret
-  context so the model can see where the problem is.
+  a bad argument or a bad document. These carry the failure message so the
+  model can see where the problem is.
 
 Handler exceptions are caught centrally in `tools/tool.nim`, so no tool needs its
-own `try`/`except` and a parser failure can never take the connection down.
+own `try`/`except` and a handler failure can never take the connection down.
 
 ## Tests
 
@@ -270,9 +295,9 @@ framing and connection bugs.
 
 | Variable | Effect |
 | - | - |
-| `DATCONTEXT_MAX_SOURCE_BYTES` | Cap on any single parsed document (default 32 MiB) |
+| `DATCONTEXT_MAX_SOURCE_BYTES` | Cap on single tool inputs loaded via `readSource` (default 32 MiB) |
 
-`fileRoot` is now a constructor argument (`newMcpServer(fileRoot = ...)`),
+`fileRoot` is a constructor argument (`newMcpServer(fileRoot = ...)`),
 not an environment variable. The example app reads `DATCONTEXT_FILE_ROOT`
 as a convenience for its own `file://` root.
 
