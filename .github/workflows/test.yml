@@ -5,3 +5,9 @@ jobs:
     uses: nimbase/setup-nim-action/.github/workflows/test_clue.yml@main
     with:
       cache: false
+      # Windows cannot build client/spawn.nim (fork/exec, no IoStream),
+      # so only POSIX runners are tested.
+      os: '[{"os":"ubuntu-latest"},{"os":"macos-15"}]'
+      # The round-trip suite spawns the example app binary; build it first
+      # so the wire tests run instead of skipping.
+      pre-test-command: 'clue build examples/mcp_full_server.nim --out:bin/example_full_server'

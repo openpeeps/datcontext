@@ -12,7 +12,7 @@ srcDir        = "src"
 requires "nim >= 2.2.12"
 requires "powpow >= 0.2.1"
 requires "openparser >= 0.3.9"
-requires "flysystem >= 0.2.0"
+requires "flysystem >= 0.2.1"
 
 
 # Tasks

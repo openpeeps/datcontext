@@ -15,77 +15,101 @@ const
 
 suite "round trip against a real spawned server":
   test "discover identifies the server as modern":
-    if not fileExists(ServerBin):
-      skip()
-    var stderrLines: seq[string]
-    let c = spawnServer(ServerBin, ["stdio"],
-      stderrOnLine = proc(line: string) = stderrLines.add(line))
-    defer: closeClient(c)
+    if fileExists(ServerBin):
+      var stderrLines: seq[string]
+      let c = spawnServer(ServerBin, ["stdio"],
+        stderrOnLine = proc(line: string) = stderrLines.add(line))
+      defer: closeClient(c)
 
-    check c.probe() == "modern"
-    check c.protocolVersion == ProtocolVersion
-    check c.serverInfo["name"].getStr == "example-full"
-    check c.instructions.len > 0
+      check c.probe() == "modern"
+      check c.protocolVersion == ProtocolVersion
+      check c.serverInfo["name"].getStr == "example-full"
+      check c.instructions.len > 0
+    else:
+      # The example server binary was not built; `skip` only
+      # marks the test, so the body stays nested to keep it
+      # from running.
+      skip()
 
   test "tools/list over the wire":
-    if not fileExists(ServerBin):
+    if fileExists(ServerBin):
+      let c = spawnServer(ServerBin, ["stdio"])
+      defer: closeClient(c)
+      c.connect()
+      let tools = c.listTools()["result"]["tools"]
+      check tools.len == 3
+      # Every tool must carry a usable schema on the wire, not just in-process.
+      for t in tools:
+        check t["name"].getStr.len > 0
+        check t["inputSchema"]["type"].getStr == "object"
+    else:
+      # The example server binary was not built; `skip` only
+      # marks the test, so the body stays nested to keep it
+      # from running.
       skip()
-    let c = spawnServer(ServerBin, ["stdio"])
-    defer: closeClient(c)
-    c.connect()
-    let tools = c.listTools()["result"]["tools"]
-    check tools.len == 3
-    # Every tool must carry a usable schema on the wire, not just in-process.
-    for t in tools:
-      check t["name"].getStr.len > 0
-      check t["inputSchema"]["type"].getStr == "object"
 
   test "tools/call returns content and structured output":
-    if not fileExists(ServerBin):
+    if fileExists(ServerBin):
+      let c = spawnServer(ServerBin, ["stdio"])
+      defer: closeClient(c)
+      c.connect()
+      let r = c.callTool("example_greet", %*{"name": "wire"})["result"]
+      check not r.hasKey("isError")
+      check r["content"][0]["type"].getStr == "text"
+      check r["structuredContent"]["name"].getStr == "wire"
+    else:
+      # The example server binary was not built; `skip` only
+      # marks the test, so the body stays nested to keep it
+      # from running.
       skip()
-    let c = spawnServer(ServerBin, ["stdio"])
-    defer: closeClient(c)
-    c.connect()
-    let r = c.callTool("example_greet", %*{"name": "wire"})["result"]
-    check not r.hasKey("isError")
-    check r["content"][0]["type"].getStr == "text"
-    check r["structuredContent"]["name"].getStr == "wire"
 
   test "several requests interleave correctly over one pipe":
-    if not fileExists(ServerBin):
+    if fileExists(ServerBin):
+      let c = spawnServer(ServerBin, ["stdio"])
+      defer: closeClient(c)
+      c.connect()
+      # Reply correlation must not mix these up.
+      for i in 0 ..< 5:
+        let r = c.callTool("example_greet", %*{"name": "n" & $i})
+        let v = r["result"]["structuredContent"]["name"].getStr
+        check v == "n" & $i
+    else:
+      # The example server binary was not built; `skip` only
+      # marks the test, so the body stays nested to keep it
+      # from running.
       skip()
-    let c = spawnServer(ServerBin, ["stdio"])
-    defer: closeClient(c)
-    c.connect()
-    # Reply correlation must not mix these up.
-    for i in 0 ..< 5:
-      let r = c.callTool("example_greet", %*{"name": "n" & $i})
-      let v = r["result"]["structuredContent"]["name"].getStr
-      check v == "n" & $i
 
   test "a tool error comes back as a tool error, not a crash":
-    if not fileExists(ServerBin):
+    if fileExists(ServerBin):
+      let c = spawnServer(ServerBin, ["stdio"])
+      defer: closeClient(c)
+      c.connect()
+      let r = c.callTool("example_greet", %*{"name": ""})["result"]
+      # The server must stay up: a bad argument is a tool error.
+      check r["isError"].getBool
+      # And the connection is still usable afterwards.
+      check c.callTool("example_greet", %*{"name": "again"})["result"].hasKey("content")
+    else:
+      # The example server binary was not built; `skip` only
+      # marks the test, so the body stays nested to keep it
+      # from running.
       skip()
-    let c = spawnServer(ServerBin, ["stdio"])
-    defer: closeClient(c)
-    c.connect()
-    let r = c.callTool("example_greet", %*{"name": ""})["result"]
-    # The server must stay up: a bad argument is a tool error.
-    check r["isError"].getBool
-    # And the connection is still usable afterwards.
-    check c.callTool("example_greet", %*{"name": "again"})["result"].hasKey("content")
 
   test "a legacy client drives the same server":
-    if not fileExists(ServerBin):
+    if fileExists(ServerBin):
+      let c = spawnServer(ServerBin, ["stdio"])
+      defer: closeClient(c)
+      # Our server is dual-era, so the probe returns modern. Force the legacy path
+      # to prove the handshake works against this server too.
+      c.protocolVersion = "2025-06-18"
+      discard c.initialize()
+      check c.initialized
+      check c.listTools()["result"]["tools"].len == 3
+    else:
+      # The example server binary was not built; `skip` only
+      # marks the test, so the body stays nested to keep it
+      # from running.
       skip()
-    let c = spawnServer(ServerBin, ["stdio"])
-    defer: closeClient(c)
-    # Our server is dual-era, so the probe returns modern. Force the legacy path
-    # to prove the handshake works against this server too.
-    c.protocolVersion = "2025-06-18"
-    discard c.initialize()
-    check c.initialized
-    check c.listTools()["result"]["tools"].len == 3
 
 suite "live transports against running servers":
   # These spawn the built binary on each transport and drive it with the real
@@ -93,55 +117,67 @@ suite "live transports against running servers":
   # handler cannot catch a framing or connection bug.
 
   test "streamable http":
-    if not fileExists(ServerBin):
-      skip()
-    let port = 19300
-    let child = startProcess(ServerBin, workingDir = "", args = ["http", $port],
-                  options = {poParentStreams})
-    defer: child.terminate()
-    discard child
+    if fileExists(ServerBin):
+      let port = 19300
+      let child = startProcess(ServerBin, workingDir = "", args = ["http", $port],
+                    options = {poParentStreams})
+      defer: child.terminate()
+      discard child
 
-    # Give the listener a moment to bind.
-    sleep(600)
-    let c = connectHttp("http://127.0.0.1:" & $port)
-    check c.probe() == "modern"
-    # The three example app tools.
-    check c.listTools()["result"]["tools"].len == 3
-    let reply = c.callTool("example_greet", %*{"name": "http"})
-    check reply["result"]["content"][0]["text"].getStr.contains("http")
+      # Give the listener a moment to bind.
+      sleep(600)
+      let c = connectHttp("http://127.0.0.1:" & $port)
+      check c.probe() == "modern"
+      # The three example app tools.
+      check c.listTools()["result"]["tools"].len == 3
+      let reply = c.callTool("example_greet", %*{"name": "http"})
+      check reply["result"]["content"][0]["text"].getStr.contains("http")
+    else:
+      # The example server binary was not built; `skip` only
+      # marks the test, so the body stays nested to keep it
+      # from running.
+      skip()
 
   test "tcp":
-    if not fileExists(ServerBin):
-      skip()
-    let port = 19301
-    let child = startProcess(ServerBin, workingDir = "", args = ["tcp", $port],
-                  options = {poParentStreams})
-    defer: child.terminate()
-    sleep(600)
+    if fileExists(ServerBin):
+      let port = 19301
+      let child = startProcess(ServerBin, workingDir = "", args = ["tcp", $port],
+                    options = {poParentStreams})
+      defer: child.terminate()
+      sleep(600)
 
-    let c = connectTcpClient("127.0.0.1", port)
-    check c.probe() == "modern"
-    check c.listTools()["result"]["tools"].len == 3
-    let reply = c.callTool("example_greet", %*{"name": "tcp"})
-    check reply["result"]["content"][0]["text"].getStr.contains("tcp")
+      let c = connectTcpClient("127.0.0.1", port)
+      check c.probe() == "modern"
+      check c.listTools()["result"]["tools"].len == 3
+      let reply = c.callTool("example_greet", %*{"name": "tcp"})
+      check reply["result"]["content"][0]["text"].getStr.contains("tcp")
+    else:
+      # The example server binary was not built; `skip` only
+      # marks the test, so the body stays nested to keep it
+      # from running.
+      skip()
 
   test "unix domain socket":
-    if not fileExists(ServerBin):
-      skip()
-    let path = "/tmp/datcontext_test_roundtrip.sock"
-    removeFile(path)
-    let child = startProcess(ServerBin, workingDir = "", args = ["unix", path],
-                  options = {poParentStreams})
-    defer:
-      child.terminate()
+    if fileExists(ServerBin):
+      let path = "/tmp/datcontext_test_roundtrip.sock"
       removeFile(path)
-    sleep(600)
+      let child = startProcess(ServerBin, workingDir = "", args = ["unix", path],
+                    options = {poParentStreams})
+      defer:
+        child.terminate()
+        removeFile(path)
+      sleep(600)
 
-    let c = connectUnixClient(path)
-    check c.probe() == "modern"
-    check c.listTools()["result"]["tools"].len == 3
-    let reply = c.callTool("example_greet", %*{"name": "unix"})
-    check reply["result"]["content"][0]["text"].getStr.contains("unix")
+      let c = connectUnixClient(path)
+      check c.probe() == "modern"
+      check c.listTools()["result"]["tools"].len == 3
+      let reply = c.callTool("example_greet", %*{"name": "unix"})
+      check reply["result"]["content"][0]["text"].getStr.contains("unix")
+    else:
+      # The example server binary was not built; `skip` only
+      # marks the test, so the body stays nested to keep it
+      # from running.
+      skip()
 
 suite "resources and prompts over the wire":
   test "resources/list and resources/read":
