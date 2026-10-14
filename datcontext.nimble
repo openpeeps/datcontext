@@ -2,7 +2,7 @@
 
 version       = "0.1.0"
 author        = "George Lemon"
-description   = "Generic MCP client/server library over powpow transports"
+description   = "MCP Client/Server based on PowPow. Supporting streamable HTTP, TCP, and Unix Domain"
 license       = "MIT"
 srcDir        = "src"
 
@@ -14,9 +14,3 @@ requires "powpow >= 0.2.1"
 requires "openparser >= 0.3.9"
 requires "flysystem >= 0.2.1"
 
-
-# Tasks
-
-task examples, "Build the example server and Unix socket client":
-  exec "clue build examples/mcp_full_server.nim --out:bin/example_full_server"
-  exec "clue build examples/mcp_unix_client.nim --out:bin/example_unix_client"
