@@ -165,14 +165,6 @@ dual era: it serves modern stateless requests and also answers the legacy
 
 JSON handling inside uses openparser for JSON.
 
-## Install
-
-```console
-nimble install datcontext
-```
-
-Built with [clue](https://github.com/openpeeps/clue).
-
 ## Resources
 
 A bare server ships no resources. Apps register their own URI schemes:
@@ -280,16 +272,6 @@ apart:
 Handler exceptions are caught centrally in `tools/tool.nim`, so no tool needs its
 own `try`/`except` and a handler failure can never take the connection down.
 
-## Tests
-
-```console
-for t in tests/test_*.nim; do clue build "$t" --out:"bin/$(basename ${t%.nim})"; done
-for t in bin/test_*; do "$t"; done
-```
-
-The round-trip suite spawns the example app binary (`examples/mcp_full_server`)
-and drives it over every transport, which is the only way to catch
-framing and connection bugs.
 
 ## Environment
 
